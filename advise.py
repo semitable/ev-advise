@@ -4,56 +4,47 @@
 #																					  #
 #######################################################################################
 ###################################### imports ########################################
-#import networkx as nx
+# import networkx as nx
 
-'''
+"""
 [TODO]
 Fix maximum recursion limit.
 import sys
 sys.setrecursionlimit(10000) # 10000 is an example, try with different values
-'''
-#import matplotlib.pyplot as plt
+"""
+# import matplotlib.pyplot as plt
+import math
+from math import sqrt
+from random import shuffle
+
 import networkx as nx
 import numpy as np
 import pandas as pd
+from scipy.special import erf, erfc
 
-from ier.IERhybrid import renesHybrid, renes
 from house.iec import IEC
+from ier.ier import IER
 from utils.utils import as_pandas
-import matplotlib.pyplot as plt
 
-####### import Graphviz
+Pbuy = 0.00006
+Psell =0.00005
 
+historical_offset = 2000
 
-Pbuy = 1
-Psell = 0.8
+prod_algkey = 'Renes Hybrid'
+cons_algkey = 'Baseline Finder Hybrid'
 
+#dataset_filename = 'dataset.gz'
+#datase_tz = 'Europe/Zurich'
+
+#dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
 house_data = np.loadtxt("house/dataset.gz2")
 ier_data = np.loadtxt("ier/data.dat")
 
-cons_algkey = "Baseline Finder" #house consumption algorithm key
-
-historical_offset = 2000
-
-#make my predictions
-
-prod_prediction = pd.DataFrame(renes(HistoricalOffset=historical_offset), columns = ['Time', 'Production'])
-prod_prediction['Time'] = pd.to_datetime(prod_prediction['Time'], unit='s')
-prod_prediction = prod_prediction.set_index('Time')
-
-
 cons_prediction = as_pandas(IEC(house_data[:(-historical_offset)]).predict([cons_algkey]))
+prod_prediction = as_pandas(IER(ier_data, historical_offset).predict([prod_algkey]))
 
-#print(cons_prediction)
-
-#######################################################################################
-#################################### Functions ########################################
-
-
-
-#print(cons_prediction)
-#print(prod_prediction)
 charging_dictionary = {
     0 : 0,
     1 : 3,
@@ -61,30 +52,51 @@ charging_dictionary = {
     3 : 46.5
 }
 
-def calc_cost(time, interval, action, ev_charge):
+
+def calc_cost(time, interval, ev_charge):
 
 
-    prod = prod_prediction[time:time+interval].sum()['Production']
-    cons = cons_prediction[time:time+interval].sum()[cons_algkey] + ev_charge
-    #print(prod, cons)
+    k = ev_charge
 
-    return cons*Pbuy - prod*Psell
+    m2 = prod_prediction[time:time + interval].sum()[prod_algkey]
+    m1 = cons_prediction[time:time + interval].sum()[cons_algkey]
 
+    s2 = prod_prediction[time:time + interval].mean()[prod_algkey + " Var"]
+    s1 = cons_prediction[time:time + interval].mean()[cons_algkey + " Var"]
+
+
+    a = (Pbuy * sqrt(s1 ** 2 + s2 ** 2)) / (
+        math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
+
+    b = (Psell * sqrt(s1 ** 2 + s2 ** 2)) / (
+        math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
+
+    c = ((Pbuy + Pbuy * erf((k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))) + Psell * erfc(
+        (k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))))) / 2
+    expected = (
+        a -
+        b +
+        (k + m1 - m2) * c
+    )
+
+    return expected
 
 
 def calc_charge(action, interval, cur_charge, max_charge):
-    #Given that Charging rates are in kW and Interval is in minutes, returns joules
+    # Given that Charging rates are in kW and Interval is in minutes, returns joules
 
     charge = min(
-        charging_dictionary[action]*1000*interval*60,
-        max_charge-cur_charge
+        charging_dictionary[action] * 1000 * interval * 60,
+        max_charge - cur_charge
     )
     return charge
 
 
+def min_charging_cost(charge):
+    return Psell * charge
 
-class Node():
 
+class Node:
     def __init__(self, battery, time):
         self.battery = battery
         self.time = time
@@ -102,55 +114,110 @@ class Node():
 
 
 def create_graph(G, start_node, action_set, interval, target):
-
-    if(start_node.time >= target.time):
+    if start_node.time >= target.time:
         if start_node.battery >= target.battery:
-            G.add_edge(start_node, target, weight = 0)
+            G.add_edge(start_node, target, weight=0)
             weight = G.node[start_node]['cost']
 
             if G.node[target]['cost'] > weight:
                 G.add_node(target, cost=weight, previous=start_node)
         return
 
+    if start_node.battery >= target.battery and min(action_set) >= 0:  # in case we charged the battery and no V2G
+        action_set = [0]
 
+    shuffle(action_set)
     for action in action_set:
 
         charge_amount = calc_charge(action, interval, start_node.battery, target.battery)
 
         new_node = Node(
-            battery= start_node.battery + charge_amount,
-            time= start_node.time + interval
+            battery=start_node.battery + charge_amount,
+            time=start_node.time + interval
         )
 
+        # check if after this node we have enough time to charge the vehicle (if needed..)
+        charge_max = calc_charge(max(action_set), target.time - new_node.time, new_node.battery, target.battery)
+        if new_node.battery + charge_max < target.battery:
+            #print("Skipping.. Not enough time to charge.")
+            continue  # if so, skip this action
 
-
-
-        edge_weight = calc_cost(start_node.time, interval, action, charge_amount)
+        edge_weight = calc_cost(start_node.time, interval, charge_amount)
         total_weight = edge_weight + G.node[start_node]['cost']
 
+        # alpha pruning:
+        alpha = (
+            calc_cost(new_node.time, target.time - new_node.time, 0) +
+            total_weight +
+            min_charging_cost(target.battery - new_node.battery)
+        )
+
+        if alpha > G.node[target]['cost']:
+            # no point in traversing this path
+            # print("Skipping.. Pruned")
+            continue
 
         if new_node not in G:
             G.add_node(new_node, cost=total_weight, previous=start_node)
         elif G.node[new_node]['cost'] > total_weight:
             G.add_node(new_node, cost=total_weight, previous=start_node)
+        else:
+            continue
 
         G.add_edge(
             start_node,
             new_node,
-            weight = edge_weight,
-            action = action
+            weight=edge_weight,
+            action=action
         )
         create_graph(G, new_node, action_set, interval, target=target)
 
 
 def reconstruct_path(G, target):
     cur = target
-    path = []
+    path = [target]
 
     while G.node[cur]['previous'] is not None:
-        print(cur)
         path.append(G.node[cur]['previous'])
         cur = G.node[cur]['previous']
 
     path.reverse()
     return path
+
+
+if __name__ == '__main__':
+    G = nx.DiGraph()
+    root = Node(0, 0)
+
+
+    interval = 10
+    max_depth = 25
+
+    charging_time_perc = 0.7
+
+
+    target_time = max_depth*interval
+
+    action_set = [0, 1, 2]
+
+    target_charge = 1000 * 60 * charging_dictionary[max(action_set)] * target_time * charging_time_perc
+
+    print("Target Charge: {0}".format(target_charge))
+
+    target = Node(target_charge, target_time)
+
+    G.add_node(root, cost=0, previous=None)
+    G.add_node(target, cost=np.inf, previous=None)
+
+    create_graph(G, root, action_set=action_set, interval=interval, target=target)
+
+    path = reconstruct_path(G, target)
+    path_edges = list(zip(path, path[1:]))
+
+    from utils.utils import plotly_figure
+    import plotly.offline as py
+
+    fig = plotly_figure(G, path=path)
+    py.plot(fig)
+
+    print(len(G.nodes()))

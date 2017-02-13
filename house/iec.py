@@ -2,22 +2,21 @@
      for predicting consumption of a house, given historical data. It also contains an IECTester
      class that can be used to test and provide results on multiple IEC runs '''
 
-from datetime import datetime as dt
-from multiprocessing import Pool, cpu_count
-from functools import partial
 import pickle
+from datetime import datetime as dt
+from functools import partial
+from multiprocessing import Pool, cpu_count
 
-from scipy import spatial
+import GPy
+import numpy as np
 import scipy.ndimage.filters
 import scipy.signal
-import GPy
-from tqdm import tqdm
+from scipy import spatial
 from sklearn.metrics import mean_squared_error
+from tqdm import tqdm
 
-from IPython.display import display
 
-import pandas as pd
-import numpy as np
+cons_col = 'House Consumption'
 
 
 def is_weekend(utc):
@@ -379,6 +378,7 @@ class IEC(object):
             "Old ACP": self.acp_old,
             "Simple Mean": self.simple_mean,
             "Baseline Finder": self.baseline_finder,
+            "Baseline Finder Hybrid": self.baseline_finder_hybrid,
             "Usage Zone Finder": self.usage_zone_finder
         }
 
@@ -401,9 +401,12 @@ class IEC(object):
             np.mean(TrainingData[:, 2]), self.PredictionWindow)
         return Predictions
 
-    def baseline_finder(self, TrainingWindow=24 * 60 * 60, K=5):
+    def baseline_finder(self, TrainingWindow=24 * 60 * 60, K=5, offset=0):
 
-        TrainingData = self.data[-(TrainingWindow):, :]
+        if offset != 0:
+            TrainingData = self.data[-TrainingWindow:-offset, :]
+        else:
+            TrainingData = self.data[-TrainingWindow:, :]
 
         CurrentTime = TrainingData[-1, 1]
 
@@ -438,6 +441,65 @@ class IEC(object):
         #    Predictions[i, 0] = Predictions[i - 1, 0] + 60
 
         return Predictions
+
+    def baseline_finder_hybrid(self, TrainingWindow=60 * 24 * 30 * 2, K=5, TrainingCycle=1, intervalST=1):
+        # Accumulate predictions according to TrainingCycle
+        Predictions = self.baseline_finder(TrainingWindow, K, self.PredictionWindow * TrainingCycle)
+        for i in range(TrainingCycle - 1, 0, -1):
+            Predictions = np.concatenate(
+                (Predictions, self.baseline_finder(TrainingWindow, K, self.PredictionWindow * i)), axis=0)
+
+        PredictionsLast = np.zeros((self.PredictionWindow, 3))
+        PredictionsLast[:, :2] = self.baseline_finder(TrainingWindow, K)
+
+        # Add last element of PredictionsLast to Predictions
+        Predictions = np.concatenate((Predictions, [PredictionsLast[0, :2]]), axis=0)  # [1::]
+
+        # Fetch data given the TrainingCycle and PredictionWindow
+        # (UTC time, Consumption during interval [time, time+1 min) in Joules)
+        DataA = self.data[-(self.PredictionWindow * TrainingCycle) - 1::]
+
+
+        # Initialize and standardize GP training set
+        TrainingLength = (TrainingCycle * self.PredictionWindow)
+        # Index=np.arange(0,TrainingLength+intervalST,intervalST)
+
+        Index = np.arange(intervalST, TrainingLength, intervalST)
+
+        X1 = np.atleast_2d(Index / float(TrainingLength)).T
+        temp = DataA[1:TrainingLength + 1, 2] - Predictions[1:TrainingLength + 1, 1]
+        # temp=gauss_filt(DataA[1:TrainingLength+1, 2], 201)-Predictions[1:TrainingLength+1, 2] #DEN BGAZEI NOHMA TO VAR
+
+        Y1 = np.atleast_2d(np.sum(temp.reshape(-1, intervalST), axis=1)[:-1]).T
+        std = np.std(Y1[:, 0])
+        Y1[:, 0] = (Y1[:, 0]) / std
+
+        # Train GP
+        # K1 =  GPy.kern.Matern32(1, variance=0.1, lengthscale=2*float(intervalST/float(TrainingLength)))+ GPy.kern.White(1)
+        # kernel=K1
+        kernel = GPy.kern.Exponential(1)  # , variance=0.1, lengthscale=float(intervalST/float(TrainingLength)))
+        #from matplotlib import pylab
+        #kernel.plot()
+        #pylab.show(block=True)
+        m = GPy.models.GPRegression(X1, Y1, kernel=kernel)
+        m.optimize()
+        #m.plot()
+        #pylab.show(block=True)
+
+        # Initialize and standardize GP input set
+        x = np.atleast_2d(np.arange(TrainingLength, TrainingLength + self.PredictionWindow, 1) / float(TrainingLength)).T
+
+        # GP Predict
+        y_mean, y_var = m.predict(x)
+
+        # Destandardize output
+        y_mean = y_mean * std
+        y_var = y_var * std ** 2
+
+        # Populate array (1st element is the groundtruth) and bound to physical limits
+        PredictionsLast[1:, 1] = np.clip(PredictionsLast[1:, 1] + y_mean[1:, 0], 0, np.inf)
+        PredictionsLast[1:, 2] = y_var[1:, 0]
+        return PredictionsLast
 
     def usage_zone_finder(self, TrainingWindow=24 * 60 * 120, K=5):
 

@@ -1,5 +1,6 @@
-import plotly.graph_objs as go
 import pandas as pd
+import plotly.graph_objs as go
+
 try:
     import pygraphviz
     from networkx.drawing.nx_agraph import graphviz_layout
@@ -28,9 +29,12 @@ def as_pandas(result):
 
     for key in result:
         df[key] = result[key][:, 1].tolist()
+        try:
+            df[key + " Var"] = result[key][:, 2].tolist()
+        except IndexError:
+            pass
 
     df = df.set_index('Time')
-
     return df
 
 
@@ -45,11 +49,27 @@ def plotly_figure(G, path=None):
         hoverinfo='none',
         mode='lines')
 
+    my_annotations = []
+
     for edge in G.edges():
         x0, y0 = pos[edge[0]]
         x1, y1 = pos[edge[1]]
         edge_trace['x'] += [x0, x1, None]
         edge_trace['y'] += [y0, y1, None]
+        my_annotations.append(
+            dict(
+                x=(x0+x1)/2,
+                y=(y0+y1)/2,
+                xref='x',
+                yref='y',
+                text='{0:.2f}'.format(G.get_edge_data(edge[0], edge[1])['weight']),
+                showarrow=False,
+                arrowhead=2,
+                ax=0,
+                ay=0
+            )
+        )
+
 
     node_trace = go.Scatter(
         x=[],
@@ -100,11 +120,7 @@ def plotly_figure(G, path=None):
                         height=650,
                         hovermode='closest',
                         margin=dict(b=20, l=5, r=5, t=40),
-                        annotations=[dict(
-                            text="Python code: <a href='https://plot.ly/ipython-notebooks/network-graphs/'> https://plot.ly/ipython-notebooks/network-graphs/</a>",
-                            showarrow=False,
-                            xref="paper", yref="paper",
-                            x=0.005, y=-0.002)],
+                        annotations=my_annotations,
                         xaxis=go.XAxis(showgrid=False, zeroline=False, showticklabels=False),
                         yaxis=go.YAxis(showgrid=False, zeroline=False, showticklabels=False)))
     return fig
