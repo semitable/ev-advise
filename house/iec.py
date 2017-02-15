@@ -494,7 +494,12 @@ class IEC(object):
         baseline_predictions = np.zeros((self.PredictionWindow, 2))
         baseline_predictions[:, 0] = IEC(TrainingData).baseline_finder()
 
-        baseline_predictions[1:, 0] = np.clip(baseline_predictions[1:, 0] + y_mean[1:, 0], 0, np.inf)
+
+        """
+        TODO: is the following prediction + mean? I think it is prediction - mean...
+        changed it for now, but must double-check
+        """
+        baseline_predictions[1:, 0] = np.clip(baseline_predictions[1:, 0] - y_mean[1:, 0], 0, np.inf)
         baseline_predictions[1:, 1] = y_var[1:, 0]
 
         return baseline_predictions
