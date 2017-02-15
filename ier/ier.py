@@ -2,15 +2,16 @@ from functools import partial
 
 import GPy
 import numpy as np
+import pandas as pd
 
 ####Load dataset
 #dataset = np.loadtxt('data.dat')
 
 
-COL_TIMESTAMP = 0
-COL_WATTAGE = 2
-COL_PRODUCTION = 4
-COL_PROD_PREDICTION = 5
+#COL_TIMESTAMP = ''
+#COL_WATTAGE = 2
+col_production = 'WTG Production'
+col_prediction = 'WTG Prediction'
 
 
 '''
@@ -30,6 +31,7 @@ class IER(object):
             param1: Historical Dataset. Last value must be current time
         '''
         self.data = data
+        self.now = data.index[-historical_offset]
         self.PredictionWindow = 12 * 60
         self.algorithms = {
             "Renes": partial(self.renes, HistoricalOffset = historical_offset),
@@ -37,57 +39,58 @@ class IER(object):
         }
 
     def predict(self, AlgKeys):
-        result = dict()
+        index = pd.DatetimeIndex(start=self.now, freq='T', periods=self.PredictionWindow)
+        result = pd.DataFrame(index=index)
 
         for key in AlgKeys:
-            result[key] = self.algorithms[key]()
+            r = self.algorithms[key]()
+            if (r.shape[1] if r.ndim > 1 else 1) > 1:
+                result[key] = r[:, 0]
+                result[key+' STD'] = r[:, 1]
+            else:
+                result[key] = r
 
         return result
 
+
     def renes(self, PredictionWindow=12*60, HistoricalOffset=0):
-        if(HistoricalOffset <= PredictionWindow):
-            print("Not enough predictions available from renes")
-            return np.full((PredictionWindow, 2), np.nan)
 
-        Predictions = np.empty((PredictionWindow, 2))
-        Predictions[1:,: ] = self.data[-HistoricalOffset:-HistoricalOffset+PredictionWindow-1, [COL_TIMESTAMP, COL_PROD_PREDICTION]] #fetch predictions from renes
-        Predictions[1:, 0] = Predictions[1:, 0] + 60 #Shift timestamps to +1 min (the prediction time)
+        assert HistoricalOffset > PredictionWindow, "Not enough predictions available from renes"
 
-        Predictions[0, : ] = self.data[-HistoricalOffset,[COL_TIMESTAMP, COL_PRODUCTION]] #row 0 is the "Ground Truth"
-        return Predictions
+        predictions = self.data[-HistoricalOffset:-HistoricalOffset+PredictionWindow][col_prediction].values
+        predictions[0] = self.data.iloc[-HistoricalOffset][col_production] #0 is the ground truth...
+        return np.squeeze(predictions)
 
 
-    def renesHybrid(self, TrainingCycle=2, PredictionWindow=12*60, HistoricalOffset=0, intervalST=2):
 
-        if(HistoricalOffset <= PredictionWindow):
-            print("Not enough predictions available from renes")
-            return np.full((PredictionWindow, 3), np.nan)
+    def renesHybrid(self, TrainingCycle=2, PredictionWindow=12*60, HistoricalOffset=0, stochastic_interval=2):
 
+        assert HistoricalOffset > PredictionWindow, "Not enough predictions available from renes"
 
-        TrainingLength=(TrainingCycle*PredictionWindow)
+        training_length=(TrainingCycle*PredictionWindow)
 
         #Fetch historical predictions from dataset according to TrainingCycle
-        Predictions= self.renes(PredictionWindow = TrainingLength, HistoricalOffset = HistoricalOffset+TrainingLength)
+        prev_predictions= self.renes(PredictionWindow = training_length, HistoricalOffset = HistoricalOffset+training_length)
 
-        #Fetch predictions for current prediction window
-        PredictionsLast=np.zeros((PredictionWindow,3))
-        PredictionsLast[:,:2] = self.renes(PredictionWindow = PredictionWindow, HistoricalOffset = HistoricalOffset)
+        predictions = np.zeros((PredictionWindow, 2))
+        predictions[:, 0] = self.renes(PredictionWindow = PredictionWindow, HistoricalOffset = HistoricalOffset)
 
-        #Add last element of PredictionsLast to Predictions
-        Predictions=np.concatenate((Predictions,[PredictionsLast[0,:2]]), axis=0)#[1::]
 
         #Fetch data given the TrainingCycle and PredictionWindow
-        Hist_Production = self.data[-HistoricalOffset-TrainingLength:-HistoricalOffset+1, COL_PRODUCTION] #Shift by one to align timestamps (prediction vs truth)
-
+        ground_truth = self.data[-HistoricalOffset-training_length:-HistoricalOffset][col_production].values #Shift by one to align timestamps (prediction vs truth)
 
         #print Predictions[:,0]
         #print dataset[-HistoricalOffset-TrainingLength:-HistoricalOffset+1, 0]
 
         #Initialize and standardize GP training set
 
-        Index=np.arange(intervalST,TrainingLength,intervalST)
-        X1=np.atleast_2d(Index/float(TrainingLength)).T
-        Y1=np.atleast_2d(Hist_Production[Index]-Predictions[Index,1]).T
+        Index=np.arange(stochastic_interval, training_length, stochastic_interval)
+
+        temp = ground_truth - prev_predictions
+
+        X1=np.atleast_2d(Index/float(training_length)).T
+
+        Y1= np.atleast_2d(np.mean(temp.reshape(-1, stochastic_interval), axis=1)[:-1]).T
 
         std=np.std(Y1[:,0])
         Y1[:,0]=(Y1[:,0])/std
@@ -104,7 +107,7 @@ class IER(object):
         #pylab.show(block=True)
 
         #Initialize and standardize GP input set
-        x=np.atleast_2d(np.arange(TrainingLength,TrainingLength+PredictionWindow,1)/float(TrainingLength)).T
+        x=np.atleast_2d(np.arange(training_length,training_length+PredictionWindow,1)/float(training_length)).T
 
         #GP Predict
         y_mean, y_var = m.predict(x)
@@ -115,8 +118,7 @@ class IER(object):
 
         #Populate array (1st element is the groundtruth) and bound to physical limits
         NominalPowerWTG=3000*60 #3 Kw --> 3*60 joule (in a minute) #np.inf
-        PredictionsLast[1:,1]=np.clip(PredictionsLast[1:,1]+y_mean[1:,0],0, NominalPowerWTG)
-        PredictionsLast[1:,2]=y_var[1:,0]
+        predictions[1:, 0]=np.clip(predictions[1:, 0]+y_mean[1:,0],0, NominalPowerWTG)
+        predictions[1:,1]=y_var[1:,0]
 
-
-        return PredictionsLast
+        return predictions

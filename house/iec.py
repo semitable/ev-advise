@@ -448,7 +448,7 @@ class IEC(object):
 
         TrainingData = self.data.tail(TrainingWindow)[[cons_col]]
 
-        prev_predictions = IEC(TrainingData[:-self.PredictionWindow]).baseline_finder()
+        prev_predictions = IEC(TrainingData[:-self.PredictionWindow]).baseline_finder(K=K)
         ground_truth = np.squeeze(TrainingData[-self.PredictionWindow-1:-1].values)
 
         # Initialize and standardize GP training set
@@ -492,7 +492,7 @@ class IEC(object):
         # Populate array (1st element is the groundtruth) and bound to physical limits
 
         baseline_predictions = np.zeros((self.PredictionWindow, 2))
-        baseline_predictions[:, 0] = IEC(TrainingData).baseline_finder()
+        baseline_predictions[:, 0] = IEC(TrainingData).baseline_finder(K=K)
 
 
         """
