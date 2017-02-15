@@ -33,16 +33,18 @@ historical_offset = 2000
 
 prod_algkey = 'Renes Hybrid'
 cons_algkey = 'Baseline Finder Hybrid'
+cons_algkey_var = 'Baseline Finder Hybrid STD'
 
 dataset_filename = 'dataset.gz'
 dataset_tz = 'Europe/Zurich'
 
-#dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
+dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
 house_data = np.loadtxt("house/dataset.gz2")
 ier_data = np.loadtxt("ier/data.dat")
 
-cons_prediction = as_pandas(IEC(house_data[:(-historical_offset)]).predict([cons_algkey]))
+cons_prediction = IEC(dataset[:(-historical_offset)]).predict([cons_algkey])
+
 prod_prediction = as_pandas(IER(ier_data, historical_offset).predict([prod_algkey]))
 
 charging_dictionary = {
@@ -61,7 +63,7 @@ def calc_cost(time, interval, ev_charge):
     m1 = cons_prediction[time:time + interval].sum()[cons_algkey]
 
     s2 = prod_prediction[time:time + interval].mean()[prod_algkey + " Var"]
-    s1 = cons_prediction[time:time + interval].mean()[cons_algkey + " Var"]
+    s1 = cons_prediction[time:time + interval].mean()[cons_algkey_var]
 
     a = (Pbuy * sqrt(s1 ** 2 + s2 ** 2)) / (
         math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
