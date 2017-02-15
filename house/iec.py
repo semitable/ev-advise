@@ -442,66 +442,62 @@ class IEC(object):
 
         return baseline[:-1] #slice last line because we are actually predicting PredictionWindow-1
 
-    def baseline_finder_hybrid(self, TrainingWindow=1440 * 60, K=8, intervalST=30):
+    def baseline_finder_hybrid(self, TrainingWindow=60 * 24 * 30 * 2, K=5, TrainingCycle=1, stochastic_interval=15):
+
+        assert TrainingCycle == 1, "Not implemented for TrainingCycle > 1"
 
         TrainingData = self.data.tail(TrainingWindow)[[cons_col]]
-        ObservationLength = mins_in_day(self.now) + (4 * 60)
 
-        similar_moments = find_similar_days(
-            TrainingData[TrainingData.index[0] + timedelta(days=K):], #Trimming the beginning cause we'll run it again
-            ObservationLength,
-            K,
-            15,
-            method=baseline_similarity
-        )
+        prev_predictions = IEC(TrainingData[:-self.PredictionWindow]).baseline_finder()
+        ground_truth = np.squeeze(TrainingData[-self.PredictionWindow-1:-1].values)
 
-        K = len(similar_moments)
+        # Initialize and standardize GP training set
+        training_length = (TrainingCycle * self.PredictionWindow)
+        # Index=np.arange(0,TrainingLength+intervalST,intervalST)
 
-        mean_error = np.zeros(self.PredictionWindow)
-
-        for i in similar_moments:
-            mean_error += (
-                (
-                    IEC(TrainingData[:i]).baseline_finder() -
-                    np.squeeze(TrainingData[i:i+timedelta(minutes=self.PredictionWindow-1)].as_matrix())
-                )/K
-            )
+        index = np.arange(stochastic_interval, training_length, stochastic_interval)
 
 
-        X = np.atleast_2d(np.arange(0, 1, intervalST / self.PredictionWindow)).T
-        Y = np.atleast_2d(group_to_interval(mean_error, intervalST, lambda x: np.mean(x, axis=1)))
+        X1 = np.atleast_2d(index/training_length).T
 
-        std = np.std(Y)
-        Y = (Y / std).T
+        temp = ground_truth - prev_predictions
+        # temp=gauss_filt(DataA[1:TrainingLength+1, 2], 201)-Predictions[1:TrainingLength+1, 2] #DEN BGAZEI NOHMA TO VAR
+
+        Y1 = np.atleast_2d(np.mean(temp.reshape(-1, stochastic_interval), axis=1)[:-1]).T
+        std = np.std(Y1[:, 0])
+        Y1[:, 0] = (Y1[:, 0]) / std
 
         # Train GP
-        kernel = (
-            GPy.kern.RBF(1, variance=1, lengthscale=intervalST / self.PredictionWindow)
-        )
+        # K1 =  GPy.kern.Matern32(1, variance=0.1, lengthscale=2*float(intervalST/float(TrainingLength)))+ GPy.kern.White(1)
+        # kernel=K1
+        kernel = GPy.kern.Exponential(1)#GPy.kern.Exponential(1, variance=0.1, lengthscale=float(stochastic_interval/float(training_length)))
 
-        m = GPy.models.GPRegression(X, Y, kernel=kernel)
+        #kernel.plot()
+        #pylab.show(block=True)
+        m = GPy.models.GPRegression(X1, Y1, kernel=kernel)
         m.optimize()
+        #m.plot()
+        #pylab.show(block=True)
 
-        X = np.atleast_2d(np.arange(0, 1, 1 / self.PredictionWindow)).T
-        y_mean, y_var = m.predict(X)
+        # Initialize and standardize GP input set
+        x = np.atleast_2d(np.arange(training_length, training_length + self.PredictionWindow, 1) / float(training_length)).T
+
+        # GP Predict
+        y_mean, y_var = m.predict(x)
 
         # Destandardize output
         y_mean = y_mean * std
-        y_var = y_var * std**2
+        y_var = y_var * std ** 2
 
-        predictions = np.zeros((self.PredictionWindow, 2))
-        predictions[:, 0] = self.baseline_finder(TrainingWindow, K)
+        # Populate array (1st element is the groundtruth) and bound to physical limits
 
-        predictions[1:, 0] = np.clip(
-            predictions[1:, 0] - y_mean[1:, 0],
-            0,
-            np.inf
-        )
+        baseline_predictions = np.zeros((self.PredictionWindow, 2))
+        baseline_predictions[:, 0] = IEC(TrainingData).baseline_finder()
 
-        predictions[1:, 1] = y_var[1:, 0]
+        baseline_predictions[1:, 0] = np.clip(baseline_predictions[1:, 0] + y_mean[1:, 0], 0, np.inf)
+        baseline_predictions[1:, 1] = y_var[1:, 0]
 
-        return predictions
-
+        return baseline_predictions
 
 
     def usage_zone_finder(self, TrainingWindow=24 * 60 * 120, K=5):
