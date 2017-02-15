@@ -34,8 +34,8 @@ historical_offset = 2000
 prod_algkey = 'Renes Hybrid'
 cons_algkey = 'Baseline Finder Hybrid'
 
-#dataset_filename = 'dataset.gz'
-#datase_tz = 'Europe/Zurich'
+dataset_filename = 'dataset.gz'
+dataset_tz = 'Europe/Zurich'
 
 #dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
@@ -55,7 +55,6 @@ charging_dictionary = {
 
 def calc_cost(time, interval, ev_charge):
 
-
     k = ev_charge
 
     m2 = prod_prediction[time:time + interval].sum()[prod_algkey]
@@ -63,7 +62,6 @@ def calc_cost(time, interval, ev_charge):
 
     s2 = prod_prediction[time:time + interval].mean()[prod_algkey + " Var"]
     s1 = cons_prediction[time:time + interval].mean()[cons_algkey + " Var"]
-
 
     a = (Pbuy * sqrt(s1 ** 2 + s2 ** 2)) / (
         math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))

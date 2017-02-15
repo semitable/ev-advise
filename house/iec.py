@@ -4,17 +4,18 @@
 
 import pickle
 from datetime import datetime as dt
+from datetime import timedelta
 from functools import partial
 from multiprocessing import Pool, cpu_count
 
 import GPy
 import numpy as np
+import pandas as pd
 import scipy.ndimage.filters
 import scipy.signal
 from scipy import spatial
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
-
 
 cons_col = 'House Consumption'
 
@@ -102,12 +103,11 @@ def is_similar_time(time1, time2):
        and if they are the same type of week day
     '''
     # print(time1)
-    utc1 = dt.utcfromtimestamp(time1)
-    utc2 = dt.utcfromtimestamp(time2)
 
-    return (utc1.hour == utc2.hour
-            and (utc1.minute == utc2.minute)
-            and similar_weekday(utc1, utc2))
+    return (time1.hour == time2.hour
+            and (time1.minute == time2.minute)
+            #and similar_weekday(utc1, utc2)
+            )
 
 
 def running_mean(seq, N):
@@ -129,36 +129,52 @@ def running_mean(seq, N):
 
 
 def mins_in_day(timestamp):
-    return dt.utcfromtimestamp(timestamp).hour * 60 + dt.utcfromtimestamp(timestamp).minute
+    return timestamp.hour * 60 + timestamp.minute
 
 
 def find_similar_days(TrainingData, ObservationLength, K, interval, method=cosine_similarity):
 
-    CurrentTime = TrainingData[-1, 1]
-
-    # Making sure we start from the quarter of an hour
-    ObservationStart = ObservationLength - ObservationLength % interval
-
-    LastDayVector = group_to_interval(
-        TrainingData[-ObservationStart:, 2], interval)
+    now = TrainingData.index[-1]
+    timezone = TrainingData.index.tz
 
     # Find moments in our dataset that have the same hour/minute and is_weekend() == weekend.
     # Those are the indexes of those moments in TrainingData
 
-    training = tuple(enumerate(TrainingData))
 
-    SimilarMoments = [index for index, day in training[-1441:ObservationLength + 1440:-60]
-                      if is_similar_time(day[1], CurrentTime)]
+    min_time = TrainingData.index[0] + timedelta(minutes=ObservationLength)
 
-    # Cosine similarity between LastDay and every day in SimilarMoments
-    Similarity = np.array([
-        method(LastDayVector,
-               group_to_interval(TrainingData[x - ObservationStart:x, 2],
-                                 interval
-                                )
-              ) for x in SimilarMoments])
+    selector = (
+        (TrainingData.index.minute==now.minute) &
+        (TrainingData.index.hour == now.hour) &
+        (TrainingData.index > min_time)
+    )
+    SimilarMoments = TrainingData[selector][:-1].tz_convert('UTC')
+    TrainingData = TrainingData.tz_convert('UTC')
 
-    indexes = [SimilarMoments[i] for i in Similarity.argsort()[-K:]]
+
+    LastDayVector = (TrainingData
+                     .tail(ObservationLength)
+                     .resample(timedelta(minutes=interval))
+                     .sum()
+                     )
+
+
+
+    obs_td = timedelta(minutes=ObservationLength)
+
+    SimilarMoments['Similarity'] = [
+        method(
+            LastDayVector.as_matrix(columns=[cons_col]),
+            TrainingData[i - obs_td:i].resample(timedelta(minutes=interval)).sum().as_matrix(columns=[cons_col])
+        ) for i in SimilarMoments.index
+    ]
+
+
+    indexes = (SimilarMoments
+               .sort_values('Similarity', ascending=False)
+               .head(K)
+               .index
+               .tz_convert(timezone))
 
     return indexes
 
@@ -176,6 +192,8 @@ def med_filt(x, k=201):
     """Apply a length-k median filter to a 1D array x.
     Boundaries are extended by repeating endpoints.
     """
+    if x.ndim > 1:
+        x = np.squeeze(x)
     med = np.median(x)
     assert k % 2 == 1, "Median filter length must be odd."
     assert x.ndim == 1, "Input must be one-dimensional."
@@ -195,6 +213,8 @@ def gauss_filt(x, k=201):
     """Apply a length-k gaussian filter to a 1D array x.
     Boundaries are extended by repeating endpoints.
     """
+    if x.ndim > 1:
+        x = np.squeeze(x)
     med = np.median(x)
     assert k % 2 == 1, "mean filter length must be odd."
     assert x.ndim == 1, "Input must be one-dimensional."
@@ -213,29 +233,23 @@ def gauss_filt(x, k=201):
 def calc_baseline(TrainingData, similar_moments,
                   PredictionWindow, half_window=100, method=gauss_filt):
 
+    if type(PredictionWindow) is not timedelta:
+        PredictionWindow = timedelta(minutes=PredictionWindow)
+
+
     K = len(similar_moments)
 
-    similar_data = np.zeros((K, PredictionWindow + 2 * half_window))
+    r = np.zeros((721, 1))
+    for i in similar_moments:
+        r += (1 / K) * TrainingData[i:i + PredictionWindow].rolling(window=half_window*2, center=True,
+                                                                    min_periods=1).mean().as_matrix()
+    baseline = np.squeeze(r)
 
-    for i in range(K):
-        similar_data[i] = TrainingData[similar_moments[i] - half_window:
-                                       similar_moments[
-                                           i] + PredictionWindow + half_window,
-                                       2]
-
-    filtered_data = np.apply_along_axis(
-        method, 1, similar_data, 2 * half_window + 1)
-
-    filtered_data = filtered_data[:, half_window: -half_window]
-
-    baseline = np.mean(filtered_data, axis=0)
-    # Find the baseline of the last few hours:
-    recent_baseline = np.mean(TrainingData[-2 * half_window:-1, 2])
+    recent_baseline = TrainingData[-2*half_window:-1].mean()[cons_col]
     interp_range = 2 * half_window
-
     baseline[:interp_range] = lerp(np.repeat(recent_baseline, interp_range),
                                    baseline[:interp_range],
-                                   np.arange(interp_range)/interp_range)
+                                   np.arange(interp_range) / interp_range)
 
     return baseline
 
@@ -369,6 +383,7 @@ class IEC(object):
             param1: Historical Dataset. Last value must be current time
         '''
         self.data = data
+        self.now = data.index[-1]
         self.PredictionWindow = 12 * 60
         self.algorithms = {
             "ACP": self.ACP,
@@ -383,123 +398,111 @@ class IEC(object):
         }
 
     def predict(self, AlgKeys):
-        result = dict()
+        index = pd.DatetimeIndex(start=self.now, freq='T', periods=self.PredictionWindow)
+        result = pd.DataFrame(index=index)
 
         for key in AlgKeys:
-            result[key] = self.algorithms[key]()
+            r = self.algorithms[key]()
+            if (r.shape[1] if r.ndim > 1 else 1) > 1:
+                result[key] = r[:, 0]
+                result[key+' STD'] = r[:, 1]
+            else:
+                result[key] = r
 
         return result
 
     def simple_mean(self, TrainingWindow=24 * 60):
+        TrainingData = self.data.tail(TrainingWindow)
+        mean = TrainingData[cons_col].mean()
+        return np.repeat(mean, self.PredictionWindow)
 
-        TrainingData = self.data[-(TrainingWindow):, :]
-        Predictions = np.zeros((self.PredictionWindow, 2))
-        for i in range(self.PredictionWindow):
-            Predictions[i, 0] = TrainingData[-1, 0] + 60 * i
-
-        Predictions[:, 1] = np.repeat(
-            np.mean(TrainingData[:, 2]), self.PredictionWindow)
-        return Predictions
-
-    def baseline_finder(self, TrainingWindow=24 * 60 * 60, K=5, offset=0):
-
-        if offset != 0:
-            TrainingData = self.data[-TrainingWindow:-offset, :]
-        else:
-            TrainingData = self.data[-TrainingWindow:, :]
-
-        CurrentTime = TrainingData[-1, 1]
+    def baseline_finder(self, TrainingWindow=1440 * 60, K=5):
+        TrainingData = self.data.tail(TrainingWindow)[[cons_col]]
 
         # ObservationLength is ALL of the current day (till now) + 4 hours
-        ObservationLength = mins_in_day(CurrentTime) + (4 * 60)
+        ObservationLength = mins_in_day(self.now) + (4 * 60)
 
-        KSimilarDays = find_similar_days(
+        similar_moments = find_similar_days(
             TrainingData, ObservationLength, K, 15, method=baseline_similarity)
 
         half_window = 60
 
         baseline = calc_baseline(
-            TrainingData, KSimilarDays, self.PredictionWindow, half_window, method=gauss_filt)
+            TrainingData, similar_moments, self.PredictionWindow, half_window, method=gauss_filt)
 
         # interpolate our prediction from current consumption to predicted
         # consumption
         interp_range = 15
         # First index is the current time
-        current_consumption = TrainingData[-1, 2]
+        current_consumption = TrainingData.tail(1)[cons_col]
 
         baseline[:interp_range] = lerp(np.repeat(current_consumption, interp_range),
                                        baseline[:interp_range],
                                        np.arange(interp_range) / interp_range)
 
-        # create the array to be returned. Column 0 has the timestamps, column
-        # 1 has the predictions
-        Predictions = np.zeros((self.PredictionWindow, 2))
-        Predictions[:, 0] = np.arange(
-            CurrentTime, CurrentTime + self.PredictionWindow * 60, 60)
-        Predictions[:, 1] = baseline
-        # for i in range(1, self.PredictionWindow):
-        #    Predictions[i, 0] = Predictions[i - 1, 0] + 60
+        return baseline[:-1] #slice last line because we are actually predicting PredictionWindow-1
 
-        return Predictions
+    def baseline_finder_hybrid(self, TrainingWindow=1440 * 60, K=8, intervalST=30):
 
-    def baseline_finder_hybrid(self, TrainingWindow=60 * 24 * 30 * 2, K=5, TrainingCycle=1, intervalST=1):
-        # Accumulate predictions according to TrainingCycle
-        Predictions = self.baseline_finder(TrainingWindow, K, self.PredictionWindow * TrainingCycle)
-        for i in range(TrainingCycle - 1, 0, -1):
-            Predictions = np.concatenate(
-                (Predictions, self.baseline_finder(TrainingWindow, K, self.PredictionWindow * i)), axis=0)
+        TrainingData = self.data.tail(TrainingWindow)[[cons_col]]
+        ObservationLength = mins_in_day(self.now) + (4 * 60)
 
-        PredictionsLast = np.zeros((self.PredictionWindow, 3))
-        PredictionsLast[:, :2] = self.baseline_finder(TrainingWindow, K)
+        similar_moments = find_similar_days(
+            TrainingData[TrainingData.index[0] + timedelta(days=K):], #Trimming the beginning cause we'll run it again
+            ObservationLength,
+            K,
+            15,
+            method=baseline_similarity
+        )
 
-        # Add last element of PredictionsLast to Predictions
-        Predictions = np.concatenate((Predictions, [PredictionsLast[0, :2]]), axis=0)  # [1::]
+        K = len(similar_moments)
 
-        # Fetch data given the TrainingCycle and PredictionWindow
-        # (UTC time, Consumption during interval [time, time+1 min) in Joules)
-        DataA = self.data[-(self.PredictionWindow * TrainingCycle) - 1::]
+        mean_error = np.zeros(self.PredictionWindow)
+
+        for i in similar_moments:
+            mean_error += (
+                (
+                    IEC(TrainingData[:i]).baseline_finder() -
+                    np.squeeze(TrainingData[i:i+timedelta(minutes=self.PredictionWindow-1)].as_matrix())
+                )/K
+            )
 
 
-        # Initialize and standardize GP training set
-        TrainingLength = (TrainingCycle * self.PredictionWindow)
-        # Index=np.arange(0,TrainingLength+intervalST,intervalST)
+        X = np.atleast_2d(np.arange(0, 1, intervalST / self.PredictionWindow)).T
+        Y = np.atleast_2d(group_to_interval(mean_error, intervalST, lambda x: np.mean(x, axis=1)))
 
-        Index = np.arange(intervalST, TrainingLength, intervalST)
-
-        X1 = np.atleast_2d(Index / float(TrainingLength)).T
-        temp = DataA[1:TrainingLength + 1, 2] - Predictions[1:TrainingLength + 1, 1]
-        # temp=gauss_filt(DataA[1:TrainingLength+1, 2], 201)-Predictions[1:TrainingLength+1, 2] #DEN BGAZEI NOHMA TO VAR
-
-        Y1 = np.atleast_2d(np.sum(temp.reshape(-1, intervalST), axis=1)[:-1]).T
-        std = np.std(Y1[:, 0])
-        Y1[:, 0] = (Y1[:, 0]) / std
+        std = np.std(Y)
+        Y = (Y / std).T
 
         # Train GP
-        # K1 =  GPy.kern.Matern32(1, variance=0.1, lengthscale=2*float(intervalST/float(TrainingLength)))+ GPy.kern.White(1)
-        # kernel=K1
-        kernel = GPy.kern.Exponential(1)  # , variance=0.1, lengthscale=float(intervalST/float(TrainingLength)))
-        #from matplotlib import pylab
-        #kernel.plot()
-        #pylab.show(block=True)
-        m = GPy.models.GPRegression(X1, Y1, kernel=kernel)
+        kernel = (
+            GPy.kern.RBF(1, variance=1, lengthscale=intervalST / self.PredictionWindow)
+        )
+
+        m = GPy.models.GPRegression(X, Y, kernel=kernel)
         m.optimize()
-        #m.plot()
-        #pylab.show(block=True)
 
-        # Initialize and standardize GP input set
-        x = np.atleast_2d(np.arange(TrainingLength, TrainingLength + self.PredictionWindow, 1) / float(TrainingLength)).T
-
-        # GP Predict
-        y_mean, y_var = m.predict(x)
+        X = np.atleast_2d(np.arange(0, 1, 1 / self.PredictionWindow)).T
+        y_mean, y_var = m.predict(X)
 
         # Destandardize output
         y_mean = y_mean * std
-        y_var = y_var * std ** 2
+        y_var = y_var * std**2
 
-        # Populate array (1st element is the groundtruth) and bound to physical limits
-        PredictionsLast[1:, 1] = np.clip(PredictionsLast[1:, 1] + y_mean[1:, 0], 0, np.inf)
-        PredictionsLast[1:, 2] = y_var[1:, 0]
-        return PredictionsLast
+        predictions = np.zeros((self.PredictionWindow, 2))
+        predictions[:, 0] = self.baseline_finder(TrainingWindow, K)
+
+        predictions[1:, 0] = np.clip(
+            predictions[1:, 0] - y_mean[1:, 0],
+            0,
+            np.inf
+        )
+
+        predictions[1:, 1] = y_var[1:, 0]
+
+        return predictions
+
+
 
     def usage_zone_finder(self, TrainingWindow=24 * 60 * 120, K=5):
 
@@ -767,6 +770,9 @@ class IECTester():
         for key in AlgorithmsToTest:
             self.results[key] = np.zeros(
                 [len(self.range), self.PredictionWindow])
+            self.results[key+" STD"] = np.zeros(
+                [len(self.range), self.PredictionWindow])
+
         self.results['GroundTruth'] = np.zeros(
             [len(self.range), self.PredictionWindow])
 
@@ -789,14 +795,17 @@ class IECTester():
                 for offset, result in zip(self.range, FuncMap):
 
                     index = (offset - self.range[0]) // self.range.step
-
                     for key in AlgorithmsToTest:
-                        self.results[key][index, :] = result[key][:, 1]
+                        std_key = key + " STD"
+
+                        self.results[key][index, :] = result[key].as_matrix()
+                        if std_key in result:
+                            self.results[std_key][index, :] = result[std_key].as_matrix()
 
                     self.results['GroundTruth'][index, :] = self.data[-offset - 1
                                                                       :-offset
                                                                       + self.PredictionWindow - 1
-                                                                     ][:, 2]
+                                                                     ][cons_col].as_matrix()
                     pbar.update(1)
 
             self.TestedAlgorithms.update(AlgorithmsToTest)
