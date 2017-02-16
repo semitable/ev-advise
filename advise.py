@@ -1,18 +1,7 @@
-#######################################################################################
-#																					  #
-#								  Pre-Heating Graph								  	  #
-#																					  #
-#######################################################################################
-###################################### imports ########################################
-# import networkx as nx
+"""
+EV advise unit
+"""
 
-"""
-[TODO]
-Fix maximum recursion limit.
-import sys
-sys.setrecursionlimit(10000) # 10000 is an example, try with different values
-"""
-# import matplotlib.pyplot as plt
 import math
 from math import sqrt
 from random import shuffle
@@ -24,10 +13,9 @@ from scipy.special import erf, erfc
 
 from house.iec import IEC
 from ier.ier import IER
-from utils.utils import as_pandas
 
-Pbuy = 0.00006
-Psell =0.00005
+buy_price = 0.00006
+sell_price = 0.00005
 
 historical_offset = 2000
 
@@ -41,23 +29,22 @@ dataset_tz = 'Europe/Zurich'
 
 dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
-#house_data = np.loadtxt("house/dataset.gz2")
-#ier_data = np.loadtxt("ier/data.dat")
+# house_data = np.loadtxt("house/dataset.gz2")
+# ier_data = np.loadtxt("ier/data.dat")
 
 cons_prediction = IEC(dataset[:(-historical_offset)]).predict([cons_algkey])
 
 prod_prediction = IER(dataset, historical_offset).predict([prod_algkey])
 
 charging_dictionary = {
-    0 : 0,
-    1 : 3,
-    2 : 14.5,
-    3 : 46.5
+    0: 0,
+    1: 3,
+    2: 14.5,
+    3: 46.5
 }
 
 
 def calc_cost(time, interval, ev_charge):
-
     k = ev_charge
 
     m2 = prod_prediction[time:time + interval].sum()[prod_algkey]
@@ -66,13 +53,13 @@ def calc_cost(time, interval, ev_charge):
     s2 = prod_prediction[time:time + interval].mean()[prod_algkey_var]
     s1 = cons_prediction[time:time + interval].mean()[cons_algkey_var]
 
-    a = (Pbuy * sqrt(s1 ** 2 + s2 ** 2)) / (
+    a = (buy_price * sqrt(s1 ** 2 + s2 ** 2)) / (
         math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
 
-    b = (Psell * sqrt(s1 ** 2 + s2 ** 2)) / (
+    b = (sell_price * sqrt(s1 ** 2 + s2 ** 2)) / (
         math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
 
-    c = ((Pbuy + Pbuy * erf((k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))) + Psell * erfc(
+    c = ((buy_price + buy_price * erf((k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))) + sell_price * erfc(
         (k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))))) / 2
     expected = (
         a -
@@ -94,7 +81,7 @@ def calc_charge(action, interval, cur_charge, max_charge):
 
 
 def min_charging_cost(charge):
-    return Psell * charge
+    return sell_price * charge
 
 
 class Node:
@@ -140,7 +127,7 @@ def create_graph(G, start_node, action_set, interval, target):
         # check if after this node we have enough time to charge the vehicle (if needed..)
         charge_max = calc_charge(max(action_set), target.time - new_node.time, new_node.battery, target.battery)
         if new_node.battery + charge_max < target.battery:
-            #print("Skipping.. Not enough time to charge.")
+            # print("Skipping.. Not enough time to charge.")
             continue  # if so, skip this action
 
         edge_weight = calc_cost(start_node.time, interval, charge_amount)
@@ -190,14 +177,12 @@ if __name__ == '__main__':
     G = nx.DiGraph()
     root = Node(0, 0)
 
-
     interval = 10
     max_depth = 25
 
     charging_time_perc = 0.7
 
-
-    target_time = max_depth*interval
+    target_time = max_depth * interval
 
     action_set = [0, 1, 2]
 
