@@ -19,39 +19,6 @@ from tqdm import tqdm
 cons_col = 'House Consumption'
 
 
-def is_weekend(utc):
-    """Evaluate if a day is a weekend Day
-    Args:
-        :param utc: A Unix Timestamp
-
-    Returns:
-        True if weekend, false otherwise
-    """
-    if utc.isoweekday() < 6:
-        return 0
-    else:
-        return 1
-
-
-def similar_weekday(utc1, utc2):
-    """ Given two utc dates, returns true if they are both weekdays (Mon-Friday) or if they
-    are both weekend days
-    """
-    return is_weekend(utc1) == is_weekend(utc2)
-
-
-def binary_hamming_distance(a, b):
-    """Calculate the hamming distance of two binary vectors of equal length
-    Args:
-        :param a:  First vector
-        :param b:  Second vector
-    Returns:
-        The Binary Hamming Distance
-
-    """
-    return np.count_nonzero(a != b)
-
-
 def cosine_similarity(a, b):
     """Calculate the cosine similarity between
     two non-zero vectors of equal length (https://en.wikipedia.org/wiki/Cosine_similarity)
@@ -79,42 +46,6 @@ def advanced_similarity(a, b):
 
     return base_similarity + highpass_similarity
 
-
-def group_to_interval(data, interval, func=lambda x: np.sum(x, axis=1)):
-    """Calculates a vector used by ACP to find similarity between days.
-    This function will aggregate the by-minute power consumption to intervals
-    """
-    return func(data.reshape(-1, interval))
-
-
-def is_similar_time(time1, time2):
-    """Checks if the two timestamps have the same hour and minute
-       and if they are the same type of week day
-    """
-    # print(time1)
-
-    return (time1.hour == time2.hour
-            and (time1.minute == time2.minute)
-            # and similar_weekday(utc1, utc2)
-            )
-
-
-def running_mean(seq, n):
-    """
-     Purpose: Find the mean for the points in a sliding window (fixed size)
-              as it is moved from left to right by one point at a time.
-     Inputs:
-        :param seq: -- list containing items for which a mean (in a sliding window) is
-                 to be calculated (N items)
-        :param n: -- number of items in sliding window
-     Outputs:
-     means -- list of means with size len(seq)
-
-    """
-    cumsum = np.cumsum(np.insert(seq, 0, 0))
-    means = (cumsum[n:] - cumsum[:-n]) / n
-    means = np.insert(means, 0, np.repeat(means[0], len(seq) - len(means)))
-    return means
 
 
 def mins_in_day(timestamp):
@@ -280,73 +211,6 @@ def calc_highpass(training_data, similar_moments,
     return highpass_prediction
 
 
-def contiguous_regions(condition):
-    """Finds contiguous True regions of the boolean array "condition". Returns
-    a 2D array where the first column is the start index of the region and the
-    second column is the end index."""
-
-    # Find the indicies of changes in "condition"
-    d = np.diff(condition)
-    idx, = d.nonzero()
-
-    # We need to start things after the change in "condition". Therefore,
-    # we'll shift the index by 1 to the right.
-    idx += 1
-
-    if condition[0]:
-        # If the start of condition is True prepend a 0
-        idx = np.r_[0, idx]
-
-    if condition[-1]:
-        # If the end of condition is True, append the length of the array
-        idx = np.r_[idx, condition.size]  # Edit
-
-    # Reshape the result into two columns
-    idx.shape = (-1, 2)
-    return idx
-
-
-def create_region(start, end, value, length=720):
-    r = np.zeros(length)
-
-    r[start:end] = value
-    return r
-
-
-def usage_region(signal, baseline=None):
-    cutoff = 2
-
-    if baseline is None:
-        baseline = med_filt(signal, 201)
-
-    highpass = signal - baseline
-
-    highpass[highpass < baseline * cutoff] = 0
-    regions = contiguous_regions(highpass > 0)
-
-    return regions
-
-
-def match_regions(regions1, regions2):
-    k = 10
-    matching_regions = list()
-
-    for r1 in regions1:
-        for r2 in regions2:
-            if abs(r1[0] - r2[0]) < k and abs(r1[1] - r2[1]) < k:
-                matching_regions.append(
-                    (int(np.mean((r1[0], r2[0]))), int(np.mean((r1[1], r2[1])))))
-                break
-    return matching_regions
-
-
-def sum_baseline_with_usage(baseline, regions, fill_values):
-    for start, end in regions:
-        r = create_region(start, end, np.mean(fill_values[start:end]))
-        baseline += r
-    return baseline
-
-
 class IEC(object):
     """The Intelligent Energy Component of a house.
     IEC will use several methods to predict the energy consumption of a house
@@ -361,7 +225,7 @@ class IEC(object):
         """
         self.data = data
         self.now = data.index[-1]
-        self.PredictionWindow = 12 * 60
+        self.prediction_window = 12 * 60
         self.algorithms = {
             "Simple Mean": self.simple_mean,
             "Baseline Finder": self.baseline_finder,
@@ -370,7 +234,7 @@ class IEC(object):
         }
 
     def predict(self, alg_keys):
-        index = pd.DatetimeIndex(start=self.now, freq='T', periods=self.PredictionWindow)
+        index = pd.DatetimeIndex(start=self.now, freq='T', periods=self.prediction_window)
         result = pd.DataFrame(index=index)
 
         for key in alg_keys:
@@ -386,7 +250,7 @@ class IEC(object):
     def simple_mean(self, training_window=24 * 60):
         training_data = self.data.tail(training_window)
         mean = training_data[cons_col].mean()
-        return np.repeat(mean, self.PredictionWindow)
+        return np.repeat(mean, self.prediction_window)
 
     def baseline_finder(self, training_window=1440 * 60, k=5):
         training_data = self.data.tail(training_window)[[cons_col]]
@@ -400,7 +264,7 @@ class IEC(object):
         half_window = 60
 
         baseline = calc_baseline(
-            training_data, similar_moments, self.PredictionWindow, half_window, method=gauss_filt)
+            training_data, similar_moments, self.prediction_window, half_window, method=gauss_filt)
 
         # interpolate our prediction from current consumption to predicted
         # consumption
@@ -420,11 +284,11 @@ class IEC(object):
 
         training_data = self.data.tail(training_window)[[cons_col]]
 
-        prev_predictions = IEC(training_data[:-self.PredictionWindow]).baseline_finder(k=k)
-        ground_truth = np.squeeze(training_data[-self.PredictionWindow - 1:-1].values)
+        prev_predictions = IEC(training_data[:-self.prediction_window]).baseline_finder(k=k)
+        ground_truth = np.squeeze(training_data[-self.prediction_window - 1:-1].values)
 
         # Initialize and standardize GP training set
-        training_length = (training_cycle * self.PredictionWindow)
+        training_length = (training_cycle * self.prediction_window)
         # Index=np.arange(0,TrainingLength+intervalST,intervalST)
 
         index = np.arange(stochastic_interval, training_length, stochastic_interval)
@@ -450,7 +314,7 @@ class IEC(object):
 
         # Initialize and standardize GP input set
         x = np.atleast_2d(
-            np.arange(training_length, training_length + self.PredictionWindow, 1) / float(training_length)).T
+            np.arange(training_length, training_length + self.prediction_window, 1) / float(training_length)).T
 
         # GP Predict
         y_mean, y_var = m.predict(x)
@@ -461,7 +325,7 @@ class IEC(object):
 
         # Populate array (1st element is the groundtruth) and bound to physical limits
 
-        baseline_predictions = np.zeros((self.PredictionWindow, 2))
+        baseline_predictions = np.zeros((self.prediction_window, 2))
         baseline_predictions[:, 0] = IEC(training_data).baseline_finder(k=k)
 
         """
@@ -485,9 +349,9 @@ class IEC(object):
 
         half_window = 100  # half window of the lowpass and high pass filter we will use
         baseline = calc_baseline(training_data, k_similar_days,
-                                 self.PredictionWindow, half_window, method=gauss_filt)
+                                 self.prediction_window, half_window, method=gauss_filt)
         highpass = calc_highpass(training_data, k_similar_days,
-                                 self.PredictionWindow, half_window, method=gauss_filt)
+                                 self.prediction_window, half_window, method=gauss_filt)
         final = baseline + highpass
 
         # interpolate our prediction from current consumption to predicted
@@ -502,9 +366,9 @@ class IEC(object):
 
         # create the array to be returned. Column 0 has the timestamps, column
         # 1 has the predictions
-        predictions = np.zeros((self.PredictionWindow, 2))
+        predictions = np.zeros((self.prediction_window, 2))
         predictions[:, 0] = np.arange(
-            current_time, current_time + self.PredictionWindow * 60, 60)
+            current_time, current_time + self.prediction_window * 60, 60)
         predictions[:, 1] = final
 
         return predictions
@@ -521,9 +385,9 @@ class IECTester:
 
     def __init__(self, data, prediction_window, testing_range, save_file='save.p'):
         self.data = data
-        self.PredictionWindow = prediction_window
+        self.prediction_window = prediction_window
         self.range = testing_range
-        self.SaveFile = save_file
+        self.save_file = save_file
 
         self.hash = 0
 
@@ -534,12 +398,12 @@ class IECTester:
 
     def load(self):
         try:
-            with open(self.SaveFile, "rb") as f:
+            with open(self.save_file, "rb") as f:
                 savedata = pickle.load(f)
                 if (savedata['version'] == self.version
                     and savedata['range'] == self.range
                     and savedata['hash'] == self.hash
-                    and savedata['PredictionWindow'] == self.PredictionWindow):
+                    and savedata['PredictionWindow'] == self.prediction_window):
                     self.TestedAlgorithms = savedata['TestedAlgorithms']
                     self.results = savedata['results']
 
@@ -551,11 +415,11 @@ class IECTester:
         savedata['version'] = self.version
         savedata['range'] = self.range
         savedata['hash'] = self.hash
-        savedata['PredictionWindow'] = self.PredictionWindow
+        savedata['PredictionWindow'] = self.prediction_window
         savedata['TestedAlgorithms'] = self.TestedAlgorithms
         savedata['results'] = self.results
 
-        with open(self.SaveFile, "wb") as f:
+        with open(self.save_file, "wb") as f:
             pickle.dump(savedata, f)
 
     def run(self, *args, multithread=True, force_processes=None):
@@ -568,12 +432,12 @@ class IECTester:
 
         for key in algorithms_to_test:
             self.results[key] = np.zeros(
-                [len(self.range), self.PredictionWindow])
+                [len(self.range), self.prediction_window])
             self.results[key + " STD"] = np.zeros(
-                [len(self.range), self.PredictionWindow])
+                [len(self.range), self.prediction_window])
 
         self.results['GroundTruth'] = np.zeros(
-            [len(self.range), self.PredictionWindow])
+            [len(self.range), self.prediction_window])
 
         IECs = [IEC(self.data[:(-offset)]) for offset in self.range]
 
@@ -583,11 +447,11 @@ class IECTester:
             else:
                 p = Pool(force_processes)
             func_map = p.imap(
-                partial(worker, AlgKeys=algorithms_to_test),
+                partial(worker, alg_keys=algorithms_to_test),
                 IECs)
         else:
             func_map = map(
-                partial(worker, AlgKeys=algorithms_to_test),
+                partial(worker, alg_keys=algorithms_to_test),
                 IECs)
         try:
             with tqdm(total=len(IECs), smoothing=0.0) as pbar:
@@ -603,7 +467,7 @@ class IECTester:
 
                     self.results['GroundTruth'][index, :] = self.data[
                                                             -offset - 1
-                                                            : -offset + self.PredictionWindow - 1
+                                                            : -offset + self.prediction_window - 1
                                                             ][cons_col].as_matrix()
                     pbar.update(1)
 
@@ -624,7 +488,7 @@ class IECTester:
         for key in self.TestedAlgorithms:
             rmse[key] = [mean_squared_error(
                 self.results['GroundTruth'][:, col],
-                self.results[key][:, col]) ** 0.5 for col in range(self.PredictionWindow)]
+                self.results[key][:, col]) ** 0.5 for col in range(self.prediction_window)]
 
         return rmse
 

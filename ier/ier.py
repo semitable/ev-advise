@@ -33,14 +33,14 @@ class IER(object):
         """
         self.data = data
         self.now = data.index[-historical_offset]
-        self.PredictionWindow = 12 * 60
+        self.prediction_window = 12 * 60
         self.algorithms = {
-            "Renes": partial(self.renes, HistoricalOffset=historical_offset),
-            "Renes Hybrid": partial(self.renes_hybrid, HistoricalOffset=historical_offset),
+            "Renes": partial(self.renes, historical_offset=historical_offset),
+            "Renes Hybrid": partial(self.renes_hybrid, historical_offset=historical_offset),
         }
 
     def predict(self, alg_keys):
-        index = pd.DatetimeIndex(start=self.now, freq='T', periods=self.PredictionWindow)
+        index = pd.DatetimeIndex(start=self.now, freq='T', periods=self.prediction_window)
         result = pd.DataFrame(index=index)
 
         for key in alg_keys:

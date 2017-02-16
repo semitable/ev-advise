@@ -9,10 +9,12 @@ from random import shuffle
 import networkx as nx
 import numpy as np
 import pandas as pd
+import plotly.offline as py
 from scipy.special import erf, erfc
 
 from house.iec import IEC
 from ier.ier import IER
+from utils.utils import plotly_figure
 
 buy_price = 0.00006
 sell_price = 0.00005
@@ -200,8 +202,7 @@ if __name__ == '__main__':
     path = reconstruct_path(G, target)
     path_edges = list(zip(path, path[1:]))
 
-    from utils.utils import plotly_figure
-    import plotly.offline as py
+
 
     fig = plotly_figure(G, path=path)
     py.plot(fig)

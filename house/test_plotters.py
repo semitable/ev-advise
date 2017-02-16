@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.metrics import mean_squared_error
 
 def PlotRMSEperMin(tester, algorithms=None, axes=None):
-    PredictionWindow = tester.PredictionWindow
+    prediction_window = tester.prediction_window
     if algorithms is None:
         algorithms = tester.TestedAlgorithms
     if axes is None:
@@ -15,7 +15,7 @@ def PlotRMSEperMin(tester, algorithms=None, axes=None):
 
     for a in algorithms:
         label = a + " Prediction Error"
-        axes.plot(range(1,PredictionWindow), rmse[a][1:], label=label, linewidth=1.5)
+        axes.plot(range(1,prediction_window), rmse[a][1:], label=label, linewidth=1.5)
 
     axes.legend(loc='lower right')
 
@@ -66,7 +66,7 @@ def PlotAverageTotalError(tester, algorithms=None, axes=None):
 
 
 def PlotSimplePrediction(tester, offset, algorithms=None, axes=None):
-    PredictionWindow = tester.PredictionWindow
+    prediction_window = tester.prediction_window
     prediction = tester.simple_prediction(offset)
 
     if algorithms is None:
@@ -76,10 +76,10 @@ def PlotSimplePrediction(tester, offset, algorithms=None, axes=None):
 
     for a in algorithms:
         label = a + " Prediction"
-        axes.plot(range(PredictionWindow), prediction[a], label=label, linewidth=2)
+        axes.plot(range(prediction_window), prediction[a], label=label, linewidth=2)
         #print("RMSE of this ", a, " prediction is: ", mean_squared_error(prediction['GroundTruth'], prediction[a])**0.5)
 
 
-    axes.plot(range(PredictionWindow), prediction['GroundTruth'], label='Ground Truth', linewidth=2)
+    axes.plot(range(prediction_window), prediction['GroundTruth'], label='Ground Truth', linewidth=2)
 
     axes.legend()
