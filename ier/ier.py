@@ -57,7 +57,8 @@ class IER(object):
 
         assert HistoricalOffset > PredictionWindow, "Not enough predictions available from renes"
 
-        predictions = self.data[-HistoricalOffset:-HistoricalOffset+PredictionWindow][col_prediction].values
+        predictions = np.zeros(PredictionWindow)
+        predictions[:] = self.data[-HistoricalOffset:-HistoricalOffset+PredictionWindow][col_prediction].values
         predictions[0] = self.data.iloc[-HistoricalOffset][col_production] #0 is the ground truth...
         return np.squeeze(predictions)
 
