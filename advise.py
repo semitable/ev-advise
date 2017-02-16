@@ -47,6 +47,13 @@ charging_dictionary = {
 
 
 def calc_cost(time, interval, ev_charge):
+    """
+    Calculates expected cost of house, ev, ier
+    :param time: when we start charging
+    :param interval: for how long we charge
+    :param ev_charge: how much we charge the ev
+    :return:
+    """
     k = ev_charge
 
     m2 = prod_prediction[time:time + interval].sum()[prod_algkey]
@@ -103,66 +110,6 @@ class Node:
         return "{0}-{1}".format(self.time, self.battery)
 
 
-def create_graph_old(G, start_node, action_set, interval, target):
-    if start_node.time >= target.time:
-        if start_node.battery >= target.battery:
-            G.add_edge(start_node, target, weight=0)
-            weight = G.node[start_node]['cost']
-
-            if G.node[target]['cost'] > weight:
-                G.add_node(target, cost=weight, previous=start_node)
-        return
-
-    if start_node.battery >= target.battery and min(action_set) >= 0:  # in case we charged the battery and no V2G
-        action_set = [0]
-
-    shuffle(action_set)
-    for action in action_set:
-
-        charge_amount = calc_charge(action, interval, start_node.battery, target.battery)
-
-        new_node = Node(
-            battery=start_node.battery + charge_amount,
-            time=start_node.time + interval
-        )
-
-        # check if after this node we have enough time to charge the vehicle (if needed..)
-        charge_max = calc_charge(max(action_set), target.time - new_node.time, new_node.battery, target.battery)
-        if new_node.battery + charge_max < target.battery:
-            # print("Skipping.. Not enough time to charge.")
-            continue  # if so, skip this action
-
-        edge_weight = calc_cost(start_node.time, interval, charge_amount)
-        total_weight = edge_weight + G.node[start_node]['cost']
-
-        # alpha pruning:
-        alpha = (
-            calc_cost(new_node.time, target.time - new_node.time, 0) +
-            total_weight +
-            min_charging_cost(target.battery - new_node.battery)
-        )
-
-        if alpha > G.node[target]['cost']:
-            # no point in traversing this path
-            # print("Skipping.. Pruned")
-            continue
-
-        if new_node not in G:
-            G.add_node(new_node, cost=total_weight, previous=start_node)
-        elif G.node[new_node]['cost'] > total_weight:
-            G.add_node(new_node, cost=total_weight, previous=start_node)
-        else:
-            continue
-
-        G.add_edge(
-            start_node,
-            new_node,
-            weight=edge_weight,
-            action=action
-        )
-        create_graph_old(G, new_node, action_set, interval, target=target)
-
-
 def shortest_path(g, start_node, action_set, interval, target):
     """
     Creates our graph using DFS while we determine the best path
@@ -199,22 +146,17 @@ def shortest_path(g, start_node, action_set, interval, target):
         ideal_remaining_cost = (calc_cost(new_node.time, target.time - new_node.time, 0)
                                 + g.node[start_node]['min_cost']
                                 + edge_weight
+                                + min_charging_cost(target.battery - new_node.battery)
                                 )
-
 
         if g.node[root]['min_cost'] < ideal_remaining_cost:
             continue
-
-
 
         if new_node not in g:
             g.add_node(new_node, min_cost=np.inf, best_action=None)
             shortest_path(g, new_node, action_set, interval, target)
 
         this_path_cost = g.node[new_node]['min_cost'] + edge_weight
-        if this_path_cost < g.node[start_node]['min_cost']:
-            #replace the weight of the current node
-            g.add_node(start_node, min_cost=this_path_cost, best_action=action)
 
         g.add_edge(start_node,
                    new_node,
@@ -222,21 +164,19 @@ def shortest_path(g, start_node, action_set, interval, target):
                    action=action
                    )
 
+        if this_path_cost < g.node[start_node]['min_cost']:
+            # replace the weight of the current node
+            g.add_node(start_node, min_cost=this_path_cost, best_action=new_node)
 
 
+def reconstruct_path(G, root):
+    cur = root
+    path = [root]
 
+    while G.node[cur]['best_action'] is not None:
+        cur = G.node[cur]['best_action']
+        path.append(cur)
 
-
-
-def reconstruct_path(G, target):
-    cur = target
-    path = [target]
-
-    while G.node[cur]['previous'] is not None:
-        path.append(G.node[cur]['previous'])
-        cur = G.node[cur]['previous']
-
-    path.reverse()
     return path
 
 
@@ -265,12 +205,10 @@ if __name__ == '__main__':
     print("Starting algorithm...")
     shortest_path(G, root, action_set=action_set, interval=interval, target=target)
     print("Done.")
-    #path = reconstruct_path(G, target)
-    #path_edges = list(zip(path, path[1:]))
+    path = reconstruct_path(G, root)
+    path_edges = list(zip(path, path[1:]))
 
-
-
-    fig = plotly_figure(G, path=None)
+    fig = plotly_figure(G, path=path)
     py.plot(fig)
 
     print(len(G.nodes()))
