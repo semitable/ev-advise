@@ -99,12 +99,12 @@ def plotly_figure(G, path=None):
         node_trace['x'].append(x)
         node_trace['y'].append(y)
 
-        node_info = "Time: +{0}<br>Battery: {1}<br>Total Cost: {2}".format(node.time, node.battery, G.node[node]['cost'])
+        node_info = "Time: +{0}<br>Battery: {1}<br>Total Cost: {2}".format(node.time, node.battery, G.node[node]['min_cost'])
 
         node_trace['text'].append(node_info)
 
         if path is None:
-            node_trace['marker']['color'].append(G.node[node]['cost'])
+            node_trace['marker']['color'].append(G.node[node]['min_cost'])
         elif node in path:
             node_trace['marker']['color'].append('rgba(255, 0, 0, 1)')
         else:

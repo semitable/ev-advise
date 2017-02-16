@@ -103,7 +103,7 @@ class Node:
         return "{0}-{1}".format(self.time, self.battery)
 
 
-def create_graph(G, start_node, action_set, interval, target):
+def create_graph_old(G, start_node, action_set, interval, target):
     if start_node.time >= target.time:
         if start_node.battery >= target.battery:
             G.add_edge(start_node, target, weight=0)
@@ -160,7 +160,72 @@ def create_graph(G, start_node, action_set, interval, target):
             weight=edge_weight,
             action=action
         )
-        create_graph(G, new_node, action_set, interval, target=target)
+        create_graph_old(G, new_node, action_set, interval, target=target)
+
+
+def shortest_path(g, start_node, action_set, interval, target):
+    """
+    Creates our graph using DFS while we determine the best path
+    :param g: The graph object we will add to
+    :param start_node: the node we are currently on
+    :param action_set: the actions possible
+    :param interval: interval in minutes
+    :param target: the target node
+    """
+    if start_node.time >= target.time:
+        if start_node.battery < target.battery:
+            g.add_node(start_node, min_cost=np.inf, best_action=None)
+        else:
+            g.add_node(start_node, min_cost=0, best_action=None)
+        return
+
+    shuffle(action_set)
+    for action in action_set:
+        charge_amount = calc_charge(action, interval, start_node.battery, target.battery)
+        new_node = Node(
+            battery=start_node.battery + charge_amount,
+            time=start_node.time + interval
+        )
+
+        edge_weight = calc_cost(start_node.time, interval, charge_amount)
+
+        # there are many instances where we can prune this new node
+        # 1. if there's no time left to charge..
+        charge_max = calc_charge(max(action_set), target.time - new_node.time, new_node.battery, target.battery)
+        if new_node.battery + charge_max < target.battery:
+            continue  # skip
+
+        # 2. if we are guaranteed to generate a more expensive path
+        ideal_remaining_cost = (calc_cost(new_node.time, target.time - new_node.time, 0)
+                                + g.node[start_node]['min_cost']
+                                + edge_weight
+                                )
+
+
+        if g.node[root]['min_cost'] < ideal_remaining_cost:
+            continue
+
+
+
+        if new_node not in g:
+            g.add_node(new_node, min_cost=np.inf, best_action=None)
+            shortest_path(g, new_node, action_set, interval, target)
+
+        this_path_cost = g.node[new_node]['min_cost'] + edge_weight
+        if this_path_cost < g.node[start_node]['min_cost']:
+            #replace the weight of the current node
+            g.add_node(start_node, min_cost=this_path_cost, best_action=action)
+
+        g.add_edge(start_node,
+                   new_node,
+                   weight=edge_weight,
+                   action=action
+                   )
+
+
+
+
+
 
 
 def reconstruct_path(G, target):
@@ -194,17 +259,18 @@ if __name__ == '__main__':
 
     target = Node(target_charge, target_time)
 
-    G.add_node(root, cost=0, previous=None)
-    G.add_node(target, cost=np.inf, previous=None)
+    G.add_node(root, min_cost=np.inf, best_action=None)
+    G.add_node(target, min_cost=0, best_action=None)
 
-    create_graph(G, root, action_set=action_set, interval=interval, target=target)
+    print("Starting algorithm...")
+    shortest_path(G, root, action_set=action_set, interval=interval, target=target)
+    print("Done.")
+    #path = reconstruct_path(G, target)
+    #path_edges = list(zip(path, path[1:]))
 
-    path = reconstruct_path(G, target)
-    path_edges = list(zip(path, path[1:]))
 
 
-
-    fig = plotly_figure(G, path=path)
+    fig = plotly_figure(G, path=None)
     py.plot(fig)
 
     print(len(G.nodes()))
