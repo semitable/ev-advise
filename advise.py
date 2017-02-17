@@ -4,7 +4,6 @@ EV advise unit
 
 import math
 from math import sqrt
-from random import shuffle
 
 import networkx as nx
 import numpy as np
@@ -31,11 +30,12 @@ dataset_tz = 'Europe/Zurich'
 
 dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
+current_time = dataset.index[-historical_offset]
+
 # house_data = np.loadtxt("house/dataset.gz2")
 # ier_data = np.loadtxt("ier/data.dat")
 
-cons_prediction = IEC(dataset[:(-historical_offset)]).predict([cons_algkey])
-
+cons_prediction = IEC(dataset[:current_time]).predict([cons_algkey])
 prod_prediction = IER(dataset, historical_offset).predict([prod_algkey])
 
 charging_dictionary = {
@@ -46,7 +46,7 @@ charging_dictionary = {
 }
 
 
-def calc_cost(time, interval, ev_charge):
+def calc_usage_cost(time, interval, ev_charge):
     """
     Calculates expected cost of house, ev, ier
     :param time: when we start charging
@@ -77,6 +77,17 @@ def calc_cost(time, interval, ev_charge):
     )
 
     return expected
+
+
+def calc_demand_cost(max_demand):
+    return max_demand * 2
+
+
+def calc_max_demand(time, interval, ev_charge):
+    demand = cons_prediction[time:time + interval][cons_algkey] - prod_prediction[time:time + interval][prod_algkey]
+    demand += ev_charge / interval
+
+    return max(demand.max(), 0)
 
 
 def calc_charge(action, interval, cur_charge, max_charge):
@@ -121,12 +132,10 @@ def shortest_path(g, start_node, action_set, interval, target):
     """
     if start_node.time >= target.time:
         if start_node.battery < target.battery:
-            g.add_node(start_node, min_cost=np.inf, best_action=None)
-        else:
-            g.add_node(start_node, min_cost=0, best_action=None)
+            g.add_node(start_node, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
         return
 
-    shuffle(action_set)
+    # shuffle(action_set)
     for action in action_set:
         charge_amount = calc_charge(action, interval, start_node.battery, target.battery)
         new_node = Node(
@@ -134,39 +143,52 @@ def shortest_path(g, start_node, action_set, interval, target):
             time=start_node.time + interval
         )
 
-        edge_weight = calc_cost(start_node.time, interval, charge_amount)
 
         # there are many instances where we can prune this new node
         # 1. if there's no time left to charge..
         charge_max = calc_charge(max(action_set), target.time - new_node.time, new_node.battery, target.battery)
         if new_node.battery + charge_max < target.battery:
             continue  # skip
-
+        """
         # 2. if we are guaranteed to generate a more expensive path
-        ideal_remaining_cost = (calc_cost(new_node.time, target.time - new_node.time, 0)
-                                + g.node[start_node]['min_cost']
-                                + edge_weight
+        ideal_remaining_cost = (calc_usage_cost(new_node.time, target.time - new_node.time, 0)
+                                + g.node[start_node]['cost']
+                                + interval_usage_cost
                                 + min_charging_cost(target.battery - new_node.battery)
                                 )
 
-        if g.node[root]['min_cost'] < ideal_remaining_cost:
+        if g.node[root]['cost'] < ideal_remaining_cost:
             continue
+        """
+
+        interval_usage_cost = calc_usage_cost(start_node.time, interval, charge_amount)
+        interval_demand = calc_max_demand(start_node.time, interval, charge_amount)
 
         if new_node not in g:
-            g.add_node(new_node, min_cost=np.inf, best_action=None)
+            g.add_node(new_node, demand_cost=np.inf, usage_cost=np.inf, best_action=None, max_demand=np.inf)
             shortest_path(g, new_node, action_set, interval, target)
 
-        this_path_cost = g.node[new_node]['min_cost'] + edge_weight
+        this_path_usage_cost = g.node[new_node]['usage_cost'] + interval_usage_cost
+        this_path_demand = max(g.node[new_node]['max_demand'], interval_demand)
+        this_path_demand_cost = calc_demand_cost(this_path_demand)
+
+        this_path_cost = this_path_usage_cost + this_path_demand_cost
+
+
 
         g.add_edge(start_node,
                    new_node,
-                   weight=edge_weight,
                    action=action
                    )
 
-        if this_path_cost < g.node[start_node]['min_cost']:
-            # replace the weight of the current node
-            g.add_node(start_node, min_cost=this_path_cost, best_action=new_node)
+        if this_path_cost < g.node[start_node]['usage_cost'] + g.node[start_node]['demand_cost']:
+            # replace the costs of the current node
+            g.add_node(start_node,
+                       best_action=new_node,
+                       usage_cost=this_path_usage_cost,
+                       demand_cost=this_path_demand_cost,
+                       max_demand=this_path_demand
+                       )
 
 
 def reconstruct_path(G, root):
@@ -199,8 +221,8 @@ if __name__ == '__main__':
 
     target = Node(target_charge, target_time)
 
-    G.add_node(root, min_cost=np.inf, best_action=None)
-    G.add_node(target, min_cost=0, best_action=None)
+    G.add_node(root, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
+    G.add_node(target, usage_cost=0, demand_cost=0, best_action=None, max_demand=0)
 
     print("Starting algorithm...")
     shortest_path(G, root, action_set=action_set, interval=interval, target=target)
