@@ -4,6 +4,7 @@ EV advise unit
 
 import math
 from math import sqrt
+from random import shuffle
 
 import networkx as nx
 import numpy as np
@@ -50,7 +51,7 @@ def calc_usage_cost(time, interval, ev_charge):
     """
     Calculates expected cost of house, ev, ier
     :param time: when we start charging
-    :param interval: for how long we charge
+    :param self.interval: for how long we charge
     :param ev_charge: how much we charge the ev
     :return:
     """
@@ -84,6 +85,8 @@ def calc_demand_cost(max_demand):
 
 
 def calc_max_demand(time, interval, ev_charge):
+    if interval <=0:
+        return 0
     demand = cons_prediction[time:time + interval][cons_algkey] - prod_prediction[time:time + interval][prod_algkey]
     demand += ev_charge / interval
 
@@ -91,7 +94,7 @@ def calc_max_demand(time, interval, ev_charge):
 
 
 def calc_charge(action, interval, cur_charge, max_charge):
-    # Given that Charging rates are in kW and Interval is in minutes, returns joules
+    # Given that Charging rates are in kW and self.interval is in minutes, returns joules
 
     charge = min(
         charging_dictionary[action] * 1000 * interval * 60,
@@ -121,116 +124,118 @@ class Node:
         return "{0}-{1}".format(self.time, self.battery)
 
 
-def shortest_path(g, start_node, action_set, interval, target):
-    """
-    Creates our graph using DFS while we determine the best path
-    :param g: The graph object we will add to
-    :param start_node: the node we are currently on
-    :param action_set: the actions possible
-    :param interval: interval in minutes
-    :param target: the target node
-    """
-    if start_node.time >= target.time:
-        if start_node.battery < target.battery:
-            g.add_node(start_node, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
-        return
+class EVA:
+    def __init__(self, target, interval, action_set, root=Node(0, 0), starting_max_demand=0):
+        self.g = nx.DiGraph()
+        self.interval = interval
+        self.action_set = action_set
+        self.root = root
+        self.target = target
 
-    # shuffle(action_set)
-    for action in action_set:
-        charge_amount = calc_charge(action, interval, start_node.battery, target.battery)
-        new_node = Node(
-            battery=start_node.battery + charge_amount,
-            time=start_node.time + interval
-        )
+        self.g.add_node(root, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
+        self.g.add_node(target, usage_cost=0, demand_cost=0, best_action=None, max_demand=starting_max_demand)
 
-
-        # there are many instances where we can prune this new node
-        # 1. if there's no time left to charge..
-        charge_max = calc_charge(max(action_set), target.time - new_node.time, new_node.battery, target.battery)
-        if new_node.battery + charge_max < target.battery:
-            continue  # skip
+    def shortest_path(self, from_node):
         """
-        # 2. if we are guaranteed to generate a more expensive path
-        ideal_remaining_cost = (calc_usage_cost(new_node.time, target.time - new_node.time, 0)
-                                + g.node[start_node]['cost']
-                                + interval_usage_cost
-                                + min_charging_cost(target.battery - new_node.battery)
+        Creates our graph using DFS while we determine the best path
+        :param from_node: the node we are currently on
+        """
+        if from_node.time >= self.target.time:
+            if from_node.battery < self.target.battery:
+                self.g.add_node(from_node, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
+            return
+
+        shuffle(self.action_set)
+        for action in self.action_set:
+            charge_amount = calc_charge(action, self.interval, from_node.battery, self.target.battery)
+            new_node = Node(
+                battery=from_node.battery + charge_amount,
+                time=from_node.time + self.interval
+            )
+
+            # there are many instances where we can prune this new node
+            # 1. if there's no time left to charge..
+            charge_max = calc_charge(max(self.action_set), self.target.time - new_node.time, new_node.battery,
+                                     self.target.battery)
+            if new_node.battery + charge_max < self.target.battery:
+                continue  # skip
+
+            # calculate this path usage cost and demand
+            interval_usage_cost = calc_usage_cost(from_node.time, self.interval, charge_amount)
+            interval_demand = calc_max_demand(from_node.time, self.interval, charge_amount)
+
+            ideal_demand = max(interval_demand, calc_max_demand(new_node.time, self.target.time - new_node.time, 0))
+
+            # 2. (continue pruning) if we are guaranteed to generate a more expensive path
+            ideal_remaining_cost = (calc_usage_cost(new_node.time, self.target.time - new_node.time, 0)
+                                    + interval_usage_cost  #
+                                    + min_charging_cost(self.target.battery - new_node.battery)
+                                    + calc_demand_cost(ideal_demand)  # ideal demand cost from now on
+                                    )
+
+            if self.g.node[from_node]['usage_cost'] + self.g.node[from_node]['demand_cost'] < ideal_remaining_cost:
+                continue
+
+            if new_node not in self.g:
+                self.g.add_node(new_node, demand_cost=np.inf, usage_cost=np.inf, best_action=None, max_demand=np.inf)
+                self.shortest_path(new_node)
+
+            this_path_usage_cost = self.g.node[new_node]['usage_cost'] + interval_usage_cost
+            this_path_demand = max(self.g.node[new_node]['max_demand'], interval_demand)
+            this_path_demand_cost = calc_demand_cost(this_path_demand)
+
+            this_path_cost = this_path_usage_cost + this_path_demand_cost
+
+            self.g.add_edge(from_node,
+                            new_node,
+                            action=action
+                            )
+
+            if this_path_cost < self.g.node[from_node]['usage_cost'] + self.g.node[from_node]['demand_cost']:
+                # replace the costs of the current node
+                self.g.add_node(from_node,
+                                best_action=new_node,
+                                usage_cost=this_path_usage_cost,
+                                demand_cost=this_path_demand_cost,
+                                max_demand=this_path_demand
                                 )
 
-        if g.node[root]['cost'] < ideal_remaining_cost:
-            continue
-        """
+    def reconstruct_path(self):
+        cur = self.root
+        path = [cur]
 
-        interval_usage_cost = calc_usage_cost(start_node.time, interval, charge_amount)
-        interval_demand = calc_max_demand(start_node.time, interval, charge_amount)
+        while self.g.node[cur]['best_action'] is not None:
+            cur = self.g.node[cur]['best_action']
+            path.append(cur)
 
-        if new_node not in g:
-            g.add_node(new_node, demand_cost=np.inf, usage_cost=np.inf, best_action=None, max_demand=np.inf)
-            shortest_path(g, new_node, action_set, interval, target)
-
-        this_path_usage_cost = g.node[new_node]['usage_cost'] + interval_usage_cost
-        this_path_demand = max(g.node[new_node]['max_demand'], interval_demand)
-        this_path_demand_cost = calc_demand_cost(this_path_demand)
-
-        this_path_cost = this_path_usage_cost + this_path_demand_cost
-
-
-
-        g.add_edge(start_node,
-                   new_node,
-                   action=action
-                   )
-
-        if this_path_cost < g.node[start_node]['usage_cost'] + g.node[start_node]['demand_cost']:
-            # replace the costs of the current node
-            g.add_node(start_node,
-                       best_action=new_node,
-                       usage_cost=this_path_usage_cost,
-                       demand_cost=this_path_demand_cost,
-                       max_demand=this_path_demand
-                       )
-
-
-def reconstruct_path(G, root):
-    cur = root
-    path = [root]
-
-    while G.node[cur]['best_action'] is not None:
-        cur = G.node[cur]['best_action']
-        path.append(cur)
-
-    return path
+        return path
 
 
 if __name__ == '__main__':
-    G = nx.DiGraph()
-    root = Node(0, 0)
-
     interval = 10
     max_depth = 25
-
     charging_time_perc = 0.7
-
     target_time = max_depth * interval
-
     action_set = [0, 1, 2]
-
     target_charge = 1000 * 60 * charging_dictionary[max(action_set)] * target_time * charging_time_perc
+    root = Node(0, 0)
 
-    print("Target Charge: {0}".format(target_charge))
+    print("self.target Charge: {0}".format(target_charge))
 
-    target = Node(target_charge, target_time)
+    advise_unit = EVA(
+        target=Node(target_charge, target_time),
+        interval=interval,
+        action_set=action_set,
+        root=root
+    )
 
-    G.add_node(root, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
-    G.add_node(target, usage_cost=0, demand_cost=0, best_action=None, max_demand=0)
+    advise_unit.shortest_path(from_node=root)
 
-    print("Starting algorithm...")
-    shortest_path(G, root, action_set=action_set, interval=interval, target=target)
     print("Done.")
-    path = reconstruct_path(G, root)
+    path = advise_unit.reconstruct_path()
     path_edges = list(zip(path, path[1:]))
 
-    fig = plotly_figure(G, path=path)
+    fig = plotly_figure(advise_unit.g, path=path)
     py.plot(fig)
 
-    print(len(G.nodes()))
+    print(len(advise_unit.g.nodes()))
