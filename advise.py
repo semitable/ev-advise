@@ -213,7 +213,7 @@ class EVA:
 
 if __name__ == '__main__':
     interval = 10
-    max_depth = 25
+    max_depth = 48
     charging_time_perc = 0.7
     target_time = max_depth * interval
     action_set = [0, 1, 2]

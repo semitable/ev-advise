@@ -7,14 +7,16 @@ from datetime import timedelta
 from functools import partial
 from multiprocessing import Pool, cpu_count
 
-import GPy
 import numpy as np
 import pandas as pd
 import scipy.ndimage.filters
 import scipy.signal
+import statsmodels.api as sm
 from scipy import spatial
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
+
+from easing import *
 
 cons_col = 'House Consumption'
 
@@ -26,8 +28,11 @@ def cosine_similarity(a, b):
     return 1.0 - spatial.distance.cosine(a, b)
 
 
-def baseline_similarity(a, b):
-    similarity = -mean_squared_error(med_filt(a, 201), med_filt(b, 201)) ** 0.5
+def baseline_similarity(a, b, filter=True):
+    if filter is True:
+        similarity = -mean_squared_error(gauss_filt(a, 201), gauss_filt(b, 201)) ** 0.5
+    else:
+        similarity = -mean_squared_error(a, b) ** 0.5
     return similarity
 
 
@@ -45,7 +50,6 @@ def advanced_similarity(a, b):
     highpass_similarity = -mean_squared_error(high_pass_a, high_pass_b)
 
     return base_similarity + highpass_similarity
-
 
 
 def mins_in_day(timestamp):
@@ -145,7 +149,7 @@ def gauss_filt(x, k=201):
 
 
 def calc_baseline(training_data, similar_moments,
-                  prediction_window, half_window=100, method=gauss_filt):
+                  prediction_window, half_window=100, method=gauss_filt, interp_range=200):
     if type(prediction_window) is not timedelta:
         prediction_window = timedelta(minutes=prediction_window)
 
@@ -158,10 +162,35 @@ def calc_baseline(training_data, similar_moments,
     baseline = np.squeeze(r)
 
     recent_baseline = training_data[-2 * half_window:-1].mean()[cons_col]
-    interp_range = 2 * half_window
-    baseline[:interp_range] = lerp(np.repeat(recent_baseline, interp_range),
-                                   baseline[:interp_range],
-                                   np.arange(interp_range) / interp_range)
+
+    if interp_range > 0:
+        baseline[:interp_range] = lerp(np.repeat(recent_baseline, interp_range),
+                                       baseline[:interp_range],
+                                       np.arange(interp_range) / interp_range)
+
+    return baseline
+
+def calc_baseline_dumb(training_data, similar_moments,
+                  prediction_window):
+    if type(prediction_window) is not timedelta:
+        prediction_window = timedelta(minutes=prediction_window)
+
+    k = len(similar_moments)
+
+    r = np.zeros((49, 1))
+    for i in similar_moments:
+        similar_day = (1/k) * training_data[i:i + prediction_window].resample(timedelta(minutes=15)).mean()
+        similar_day = similar_day[0:49]
+        r += similar_day
+        #r += (1 / k) * training_data[i:i + prediction_window].as_matrix
+
+
+    baseline = np.squeeze(r)
+
+    b = pd.DataFrame(baseline).set_index(pd.TimedeltaIndex(freq='15T', start=0, periods=49)).resample(timedelta(minutes=1)).ffill()
+    baseline = np.squeeze(b.as_matrix())
+    baseline = np.concatenate((baseline, np.atleast_1d(baseline[-1])))
+
 
     return baseline
 
@@ -178,14 +207,17 @@ def highpass_filter(a):
 
 def calc_highpass(training_data, similar_moments,
                   prediction_window, half_window, method=gauss_filt):
+    if type(prediction_window) is not timedelta:
+        prediction_window = timedelta(minutes=prediction_window)
+
     k = len(similar_moments)
 
-    similar_data = np.zeros((k, prediction_window + 2 * half_window))
+    similar_data = np.zeros((k, int(prediction_window.total_seconds() / 60) + 2 * half_window))
 
     for i in range(k):
         similar_data[i] = training_data[
-                          similar_moments[i] - half_window
-                          : similar_moments[i] + prediction_window + half_window,
+                          similar_moments[i] - timedelta(minutes=half_window)
+                          : similar_moments[i] + prediction_window + timedelta(minutes=half_window),
                           2
                           ]
 
@@ -228,9 +260,42 @@ class IEC(object):
         self.prediction_window = 12 * 60
         self.algorithms = {
             "Simple Mean": self.simple_mean,
-            "Baseline Finder": self.baseline_finder,
-            "Baseline Finder Hybrid": self.baseline_finder_hybrid,
-            "Usage Zone Finder": self.usage_zone_finder
+            "Usage Zone Finder": self.usage_zone_finder,
+            "ARIMA": self.ARIMAforecast,
+            "Baseline Finder":  partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
+                          short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=250,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "STLF": self.baseline_finder_dumb,
+            "b1": partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
+                          short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=250,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "b2": partial(self.baseline_finder, training_window=1440 * 60, k=3, long_interp_range=250,
+                          short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=300,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "b3": partial(self.baseline_finder, training_window=1440 * 60, k=6, long_interp_range=250,
+                          short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=200,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "b4": partial(self.baseline_finder, training_window=1440 * 60, k=12, long_interp_range=250,
+                          short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=200,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "b5": partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
+                          short_interp_range=25, half_window=50, similarity_interval=5, recent_baseline_length=250,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "b6": partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
+                          short_interp_range=25, half_window=60, similarity_interval=5, recent_baseline_length=300,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc),
+            "b7": partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
+                          short_interp_range=25, half_window=80, similarity_interval=5, recent_baseline_length=200,
+                          observation_length_addition=240, short_term_ease_method=easeOutSine,
+                          long_term_ease_method=easeOutCirc)
+
         }
 
     def predict(self, alg_keys):
@@ -252,7 +317,76 @@ class IEC(object):
         mean = training_data[cons_col].mean()
         return np.repeat(mean, self.prediction_window)
 
-    def baseline_finder(self, training_window=1440 * 60, k=5):
+    def baseline_finder(self, training_window=1440 * 60, k=7, long_interp_range=300, short_interp_range=15,
+                        half_window=100, similarity_interval=15, recent_baseline_length=200,
+                        observation_length_addition=240, short_term_ease_method=easeOutQuad,
+                        long_term_ease_method=easeOutQuad):
+        training_data = self.data.tail(training_window)[[cons_col]]
+
+        # observation_length is ALL of the current day (till now) + 4 hours
+        observation_length = mins_in_day(self.now) + observation_length_addition
+
+        similar_moments = find_similar_days(
+            training_data, observation_length, k, similarity_interval, method=baseline_similarity)
+
+        baseline = calc_baseline(
+            training_data, similar_moments, self.prediction_window, half_window, method=gauss_filt, interp_range=0)
+
+        # long range interpolate
+
+        interp_range = long_interp_range
+        recent_baseline = training_data[-recent_baseline_length:-1].mean()[cons_col]
+
+        method = np.array(list(map(lambda x: long_term_ease_method(x, 0, 1, interp_range), np.arange(interp_range))))
+
+        if interp_range > 0:
+            baseline[:interp_range] = lerp(np.repeat(recent_baseline, interp_range),
+                                           baseline[:interp_range],
+                                           method)
+
+        # interpolate our prediction from current consumption to predicted
+        # consumption
+        # First index is the current time
+
+        interp_range = short_interp_range
+        current_consumption = training_data.tail(1)[cons_col]
+        method = np.array(list(map(lambda x: short_term_ease_method(x, 0, 1, interp_range), np.arange(interp_range))))
+        if interp_range > 0:
+            baseline[:interp_range] = lerp(np.repeat(current_consumption, interp_range),
+                                           baseline[:interp_range],
+                                           method)
+
+        return baseline[:-1]  # slice last line because we are actually predicting PredictionWindow-1
+
+    def baseline_finder_dumb(self, training_window=1440 * 60, k=7):
+        training_data = self.data.tail(training_window)[[cons_col]]
+
+        # observation_length is ALL of the current day (till now) + 4 hours
+        observation_length = mins_in_day(self.now) + 4*60
+
+        mse = partial(baseline_similarity, filter=False)
+
+        similar_moments = find_similar_days(
+            training_data, observation_length, k, 60, method=mse)
+
+        baseline = calc_baseline_dumb(training_data, similar_moments, self.prediction_window)
+
+        # long range interpolate
+
+
+        # interpolate our prediction from current consumption to predicted
+        # consumption
+        # First index is the current time
+
+        current_consumption = training_data.tail(1)[cons_col]
+
+
+        baseline[0] = current_consumption
+
+        return baseline[:-1]  # slice last line because we are actually predicting PredictionWindow-1
+
+    def usage_zone_finder(self, training_window=24 * 60 * 120, k=5):
+
         training_data = self.data.tail(training_window)[[cons_col]]
 
         # observation_length is ALL of the current day (till now) + 4 hours
@@ -266,88 +400,7 @@ class IEC(object):
         baseline = calc_baseline(
             training_data, similar_moments, self.prediction_window, half_window, method=gauss_filt)
 
-        # interpolate our prediction from current consumption to predicted
-        # consumption
-        interp_range = 15
-        # First index is the current time
-        current_consumption = training_data.tail(1)[cons_col]
-
-        baseline[:interp_range] = lerp(np.repeat(current_consumption, interp_range),
-                                       baseline[:interp_range],
-                                       np.arange(interp_range) / interp_range)
-
-        return baseline[:-1]  # slice last line because we are actually predicting PredictionWindow-1
-
-    def baseline_finder_hybrid(self, training_window=60 * 24 * 30 * 2, k=5, training_cycle=1, stochastic_interval=15):
-
-        assert training_cycle == 1, "Not implemented for TrainingCycle > 1"
-
-        training_data = self.data.tail(training_window)[[cons_col]]
-
-        prev_predictions = IEC(training_data[:-self.prediction_window]).baseline_finder(k=k)
-        ground_truth = np.squeeze(training_data[-self.prediction_window - 1:-1].values)
-
-        # Initialize and standardize GP training set
-        training_length = (training_cycle * self.prediction_window)
-        # Index=np.arange(0,TrainingLength+intervalST,intervalST)
-
-        index = np.arange(stochastic_interval, training_length, stochastic_interval)
-
-        x1 = np.atleast_2d(index / training_length).T
-
-        temp = ground_truth - prev_predictions
-        # temp=gauss_filt(DataA[1:TrainingLength+1, 2], 201)-Predictions[1:TrainingLength+1, 2] #DEN BGAZEI NOHMA TO VAR
-
-        y1 = np.atleast_2d(np.mean(temp.reshape(-1, stochastic_interval), axis=1)[:-1]).T
-        std = np.std(y1[:, 0])
-        y1[:, 0] = (y1[:, 0]) / std
-
-        kernel = GPy.kern.Exponential(
-            1)  # GPy.kern.Exponential(1, variance=0.1, lengthscale=float(stochastic_interval/float(training_length)))
-
-        # kernel.plot()
-        # pylab.show(block=True)
-        m = GPy.models.GPRegression(x1, y1, kernel=kernel)
-        m.optimize()
-        # m.plot()
-        # pylab.show(block=True)
-
-        # Initialize and standardize GP input set
-        x = np.atleast_2d(
-            np.arange(training_length, training_length + self.prediction_window, 1) / float(training_length)).T
-
-        # GP Predict
-        y_mean, y_var = m.predict(x)
-
-        # Destandardize output
-        y_mean *= std
-        y_var *= std ** 2
-
-        # Populate array (1st element is the groundtruth) and bound to physical limits
-
-        baseline_predictions = np.zeros((self.prediction_window, 2))
-        baseline_predictions[:, 0] = IEC(training_data).baseline_finder(k=k)
-
-
-        baseline_predictions[1:, 0] = np.clip(baseline_predictions[1:, 0] + y_mean[1:, 0], 0, np.inf)
-        baseline_predictions[1:, 1] = y_var[1:, 0]
-
-        return baseline_predictions
-
-    def usage_zone_finder(self, training_window=24 * 60 * 120, k=5):
-
-        training_data = self.data[-training_window:, :]
-        current_time = training_data[-1, 1]
-        # observation_length is ALL of the current day (till now) + 4 hours
-        observation_length = mins_in_day(current_time) + (4 * 60)
-
-        k_similar_days = find_similar_days(
-            training_data, observation_length, k, 15, method=baseline_similarity)
-
-        half_window = 100  # half window of the lowpass and high pass filter we will use
-        baseline = calc_baseline(training_data, k_similar_days,
-                                 self.prediction_window, half_window, method=gauss_filt)
-        highpass = calc_highpass(training_data, k_similar_days,
+        highpass = calc_highpass(training_data, similar_moments,
                                  self.prediction_window, half_window, method=gauss_filt)
         final = baseline + highpass
 
@@ -355,20 +408,41 @@ class IEC(object):
         # consumption
         interp_range = 15
         # First index is the current time
-        current_consumption = training_data[-1, 2]
+        current_consumption = training_data.tail(1)[cons_col]
 
         final[:interp_range] = lerp(np.repeat(current_consumption, interp_range),
                                     final[:interp_range],
                                     np.arange(interp_range) / interp_range)
 
-        # create the array to be returned. Column 0 has the timestamps, column
-        # 1 has the predictions
-        predictions = np.zeros((self.prediction_window, 2))
-        predictions[:, 0] = np.arange(
-            current_time, current_time + self.prediction_window * 60, 60)
-        predictions[:, 1] = final
+        return final[:-1]  # slice last line because we are actually predicting PredictionWindow-1
 
-        return predictions
+    def ARIMAforecast(self, training_window=1440 * 7, interval=60):
+        training_data = self.data.tail(training_window)[cons_col].values
+
+        TrainingDataIntervals = [sum(training_data[current: current + interval]) / interval for current in
+                                 range(0, len(training_data), interval)]
+        # test_stationarity(TrainingDataIntervals)
+        try:
+            model = sm.tsa.SARIMAX(TrainingDataIntervals, order=(1, 0, 0),
+                                   seasonal_order=(1, 1, 1, int(1440 // interval)))
+            model_fit = model.fit(disp=0)
+        except:
+            model = sm.tsa.SARIMAX(TrainingDataIntervals, enforce_stationarity=False)
+            model_fit = model.fit(disp=0)
+        #
+
+        output = model_fit.forecast(int(self.prediction_window / interval))
+
+        # Predictions = np.zeros((self.prediction_window, 4))
+        # Predictions[:, 0] = np.arange(CurrentUTCTime, CurrentUTCTime + self.prediction_window * 60, 60)
+        # Predictions[:, 1] = np.arange(CurrentLocalTime, CurrentLocalTime + self.prediction_window * 60, 60)
+        # Predictions[:, 2] = np.repeat(output, interval)
+        # Predictions[:, 3] = 0
+
+        Predictions = np.repeat(output, interval)
+        Predictions[0] = training_data[-1]  # current consumption
+
+        return Predictions
 
 
 def worker(ie, alg_keys):
@@ -452,9 +526,8 @@ class IECTester:
                 IECs)
         try:
             with tqdm(total=len(IECs), smoothing=0.0) as pbar:
-                for offset, result in zip(self.range, func_map):
+                for index, (offset, result) in enumerate(zip(self.range, func_map)):
 
-                    index = (offset - self.range[0]) // self.range.step
                     for key in algorithms_to_test:
                         std_key = key + " STD"
 
@@ -527,14 +600,16 @@ class IECTester:
 
 
 def main():
-    data = np.loadtxt("dataset.gz2")
+    dataset_filename = '../dataset-kw.gz'
+    dataset_tz = 'Europe/Zurich'
+
+    data = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
     prediction_window = 720
     testing_range = range(prediction_window, prediction_window + 200, 1)
 
     tester = IECTester(data, prediction_window, testing_range, save_file=None)
-    tester.run('ACP', 'Usage Zone Finder',
-               'Baseline Finder', multithread=False)
+    tester.run('Baseline Finder Hybrid', multithread=False)
 
 
 if __name__ == '__main__':
