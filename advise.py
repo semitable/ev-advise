@@ -16,20 +16,38 @@ from house.iec import IEC
 from ier.ier import IER
 from utils.utils import plotly_figure
 
-buy_price = 0.00006
-sell_price = 0.00005
+import datetime
+
+from battery.battery import Charger
 
 historical_offset = 2000
 
 prod_algkey = 'Renes Hybrid'
 prod_algkey_var = 'Renes Hybrid STD'
-cons_algkey = 'Baseline Finder Hybrid'
-cons_algkey_var = 'Baseline Finder Hybrid STD'
+cons_algkey = 'Baseline Finder'
 
-dataset_filename = 'dataset.gz'
+# cons_algkey_var = 'Baseline Finder Hybrid STD'
+
+dataset_filename = 'dataset-kw.gz'
 dataset_tz = 'Europe/Zurich'
 
 dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
+
+# Create Usage Cost Column
+usage_cost_key = 'Usage Cost'
+peak_day_pricing = True  # https://www.pge.com/en_US/business/rate-plans/rate-plans/peak-day-pricing/peak-day-pricing.page
+
+if peak_day_pricing:
+    # summer only
+    dataset[usage_cost_key] = 0.202
+    dataset.loc[(dataset.index.time > datetime.time(hour=8, minute=30)) & (
+    dataset.index.time < datetime.time(hour=21, minute=30)), usage_cost_key] = 0.230
+    dataset.loc[(dataset.index.time > datetime.time(hour=12, minute=00)) & (
+    dataset.index.time < datetime.time(hour=18, minute=00)), usage_cost_key] = 0.253
+
+    dataset[usage_cost_key] = dataset[usage_cost_key] / 60
+
+    min_price = 0.202
 
 current_time = dataset.index[-historical_offset]
 
@@ -38,13 +56,6 @@ current_time = dataset.index[-historical_offset]
 
 cons_prediction = IEC(dataset[:current_time]).predict([cons_algkey])
 prod_prediction = IER(dataset, historical_offset).predict([prod_algkey])
-
-charging_dictionary = {
-    0: 0,
-    1: 3,
-    2: 14.5,
-    3: 46.5
-}
 
 
 def calc_usage_cost(time, interval, ev_charge):
@@ -55,56 +66,76 @@ def calc_usage_cost(time, interval, ev_charge):
     :param ev_charge: how much we charge the ev
     :return:
     """
-    k = ev_charge
+    if interval <= 0:
+        return 0
 
-    m2 = prod_prediction[time:time + interval].sum()[prod_algkey]
-    m1 = cons_prediction[time:time + interval].sum()[cons_algkey]
+    interval_in_minutes = interval
+    time = current_time + datetime.timedelta(minutes=time)
+    interval = datetime.timedelta(minutes=interval)
 
-    s2 = prod_prediction[time:time + interval].mean()[prod_algkey_var]
-    s1 = cons_prediction[time:time + interval].mean()[cons_algkey_var]
+    usage = pd.DataFrame()
 
-    a = (buy_price * sqrt(s1 ** 2 + s2 ** 2)) / (
-        math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
+    m2 = prod_prediction[time:time + interval][prod_algkey]
+    m1 = cons_prediction[time:time + interval][cons_algkey]
 
-    b = (sell_price * sqrt(s1 ** 2 + s2 ** 2)) / (
-        math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
+    usage['p'] = m2
+    usage['c'] = m1
+    usage['e'] = ev_charge / interval_in_minutes
 
-    c = ((buy_price + buy_price * erf((k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))) + sell_price * erfc(
-        (k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))))) / 2
-    expected = (
-        a -
-        b +
-        (k + m1 - m2) * c
-    )
+    pbuy = dataset[time:time + interval][usage_cost_key]
 
-    return expected
+    final = ((usage['c'] + usage['e'] - usage['p']) * pbuy).sum()
 
+    return final
+
+
+    #    k = ev_charge
+
+    # s2 = prod_prediction[time:time + interval].mean()[prod_algkey_var]
+    # #s1 = cons_prediction[time:time + interval].mean()[cons_algkey_var]
+    #
+    # a = (buy_price * sqrt(s1 ** 2 + s2 ** 2)) / (
+    #     math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
+    #
+    # b = (sell_price * sqrt(s1 ** 2 + s2 ** 2)) / (
+    #     math.e ** ((k + m1 - m2) ** 2 / (2 * (s1 ** 2 + s2 ** 2))) * sqrt(2 * math.pi))
+    #
+    # c = ((buy_price + buy_price * erf((k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))) + sell_price * erfc(
+    #     (k + m1 - m2) / (sqrt(2) * sqrt(s1 ** 2 + s2 ** 2))))) / 2
+    # expected = (
+    #     a -
+    #     b +
+    #     (k + m1 - m2) * c
+    # )
 
 def calc_demand_cost(max_demand):
-    return max_demand * 2
+    return max_demand * 8.03
 
 
 def calc_max_demand(time, interval, ev_charge):
     if interval <=0:
         return 0
+    interval_in_minutes = interval
+
+    time = current_time + datetime.timedelta(minutes=time)
+    interval = datetime.timedelta(minutes=interval)
+
     demand = cons_prediction[time:time + interval][cons_algkey] - prod_prediction[time:time + interval][prod_algkey]
-    demand += ev_charge / interval
+    demand += ev_charge / interval_in_minutes
 
     return max(demand.max(), 0)
 
 
-def calc_charge(action, interval, cur_charge, max_charge):
+def calc_charge(action, interval, cur_charge):
     # Given that Charging rates are in kW and self.interval is in minutes, returns joules
 
-    charge = min(
-        charging_dictionary[action] * 1000 * interval * 60,
-        max_charge - cur_charge
-    )
-    return charge
+    charger = Charger(cur_charge)
+
+    return charger.charge(action, interval)
 
 
 def min_charging_cost(charge):
-    return sell_price * charge
+    return min_price * charge
 
 
 class Node:
@@ -140,29 +171,32 @@ class EVA:
         Creates our graph using DFS while we determine the best path
         :param from_node: the node we are currently on
         """
+
+        # target.time is the time that the battery must be charged and from_node.time is the current time
         if from_node.time >= self.target.time:
             if from_node.battery < self.target.battery:
+                # this (end) node is acceptable only if we have enough charge in the battery
                 self.g.add_node(from_node, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
             return
 
-        shuffle(self.action_set)
+        shuffle(self.action_set)  # by shuffling we can achieve better pruning
         for action in self.action_set:
-            charge_amount = calc_charge(action, self.interval, from_node.battery, self.target.battery)
+            new_battery, battery_consumption = calc_charge(action, self.interval, from_node.battery)
+
             new_node = Node(
-                battery=from_node.battery + charge_amount,
+                battery=new_battery,
                 time=from_node.time + self.interval
             )
 
             # there are many instances where we can prune this new node
             # 1. if there's no time left to charge..
-            charge_max = calc_charge(max(self.action_set), self.target.time - new_node.time, new_node.battery,
-                                     self.target.battery)
-            if new_node.battery + charge_max < self.target.battery:
+            max_battery, _ = calc_charge(max(self.action_set), self.target.time - new_node.time, new_node.battery)
+            if max_battery < self.target.battery:
                 continue  # skip
 
             # calculate this path usage cost and demand
-            interval_usage_cost = calc_usage_cost(from_node.time, self.interval, charge_amount)
-            interval_demand = calc_max_demand(from_node.time, self.interval, charge_amount)
+            interval_usage_cost = calc_usage_cost(from_node.time, self.interval, battery_consumption)
+            interval_demand = calc_max_demand(from_node.time, self.interval, battery_consumption)
 
             ideal_demand = max(interval_demand, calc_max_demand(new_node.time, self.target.time - new_node.time, 0))
 
@@ -212,15 +246,16 @@ class EVA:
 
 
 if __name__ == '__main__':
-    interval = 10
+    interval = 15
     max_depth = 48
-    charging_time_perc = 0.7
-    target_time = max_depth * interval
-    action_set = [0, 1, 2]
-    target_charge = 1000 * 60 * charging_dictionary[max(action_set)] * target_time * charging_time_perc
-    root = Node(0, 0)
 
-    print("self.target Charge: {0}".format(target_charge))
+
+    target_time = max_depth * interval
+    action_set = [0, 0.5, 1]
+    target_charge = 1
+    root = Node(0.5, 0)
+
+    print("Target Charge: {0}".format(target_charge))
 
     advise_unit = EVA(
         target=Node(target_charge, target_time),

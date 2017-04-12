@@ -16,7 +16,7 @@ from scipy import spatial
 from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 
-from easing import *
+from .easing import *
 
 cons_col = 'House Consumption'
 
