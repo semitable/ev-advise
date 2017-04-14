@@ -33,7 +33,7 @@ class IER(object):
         """
         self.data = data
         self.now = data.index[-historical_offset]
-        self.prediction_window = 12 * 60
+        self.prediction_window = 16 * 60
         self.algorithms = {
             "Renes": partial(self.renes, historical_offset=historical_offset),
             "Renes Hybrid": partial(self.renes_hybrid, historical_offset=historical_offset),
@@ -53,7 +53,7 @@ class IER(object):
 
         return result
 
-    def renes(self, prediction_window=12 * 60, historical_offset=0):
+    def renes(self, prediction_window=16 * 60, historical_offset=0):
 
         assert historical_offset > prediction_window, "Not enough predictions available from renes"
 
@@ -62,7 +62,7 @@ class IER(object):
         predictions[0] = self.data.iloc[-historical_offset][col_production]  # 0 is the ground truth...
         return np.squeeze(predictions)
 
-    def renes_hybrid(self, training_cycle=2, prediction_window=12 * 60, historical_offset=0, stochastic_interval=2):
+    def renes_hybrid(self, training_cycle=2, prediction_window=16 * 60, historical_offset=0, stochastic_interval=2):
 
         assert historical_offset > prediction_window, "Not enough predictions available from renes"
 

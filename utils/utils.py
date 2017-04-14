@@ -99,7 +99,12 @@ def plotly_figure(G, path=None):
         node_trace['x'].append(x)
         node_trace['y'].append(y)
 
-        node_info = "Time: +{0}<br>Battery: {1}<br>Usage Cost: {2}<br>Demand Cost: {3}<br>Total Cost: {4}".format(node.time, node.battery, G.node[node]['usage_cost'], G.node[node]['demand_cost'], G.node[node]['usage_cost'] + G.node[node]['demand_cost'])
+        node_info = "Time: +{0}<br>Battery: {1}<br>Usage Cost: {2}<br>Maximum Demand: {3}".format(node.time,
+                                                                                                  node.battery,
+                                                                                                  G.node[node][
+                                                                                                      'usage_cost'],
+                                                                                                  G.node[node][
+                                                                                                      'max_demand'])
 
         node_trace['text'].append(node_info)
 

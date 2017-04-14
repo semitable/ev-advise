@@ -150,12 +150,13 @@ def gauss_filt(x, k=201):
 
 def calc_baseline(training_data, similar_moments,
                   prediction_window, half_window=100, method=gauss_filt, interp_range=200):
+    prediction_window_in_mins = prediction_window
     if type(prediction_window) is not timedelta:
         prediction_window = timedelta(minutes=prediction_window)
 
     k = len(similar_moments)
 
-    r = np.zeros((721, 1))
+    r = np.zeros((prediction_window_in_mins + 1, 1))
     for i in similar_moments:
         r += (1 / k) * training_data[i:i + prediction_window].rolling(window=half_window * 2, center=True,
                                                                       min_periods=1).mean().as_matrix()
@@ -257,7 +258,7 @@ class IEC(object):
         """
         self.data = data
         self.now = data.index[-1]
-        self.prediction_window = 12 * 60
+        self.prediction_window = 16 * 60
         self.algorithms = {
             "Simple Mean": self.simple_mean,
             "Usage Zone Finder": self.usage_zone_finder,
@@ -605,7 +606,7 @@ def main():
 
     data = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
-    prediction_window = 720
+    prediction_window = 960
     testing_range = range(prediction_window, prediction_window + 200, 1)
 
     tester = IECTester(data, prediction_window, testing_range, save_file=None)
