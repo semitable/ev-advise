@@ -75,7 +75,7 @@ if europe:
     min_price = 0.0485
 
 elif peak_day_pricing:
-    # summer only
+    # summer only: https://www.pge.com/en_US/business/rate-plans/rate-plans/peak-day-pricing/peak-day-pricing.page
     dataset[usage_cost_key] = 0.202
     dataset.loc[(dataset.index.time > datetime.time(hour=8, minute=30)) & (
         dataset.index.time < datetime.time(hour=21, minute=30)), usage_cost_key] = 0.230
@@ -115,7 +115,8 @@ def calc_charge_with_error(action, interval, cur_charge):
 
     current_charge, battery_consumption = charger.charge(action, interval)
 
-    current_charge += np.random.normal(0, 0.05 * (current_charge - cur_charge) / 3)
+    if current_charge != cur_charge:
+        current_charge += np.random.normal(0, 0.05 * abs((current_charge - cur_charge)) / 3)
 
     return current_charge, battery_consumption
 
