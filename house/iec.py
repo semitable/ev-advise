@@ -250,7 +250,7 @@ class IEC(object):
     for a given prediction window using historical data.
     """
 
-    def __init__(self, data):
+    def __init__(self, data, prediction_window=16 * 60):
         """Initializing the IEC.
 
         Args:
@@ -258,7 +258,7 @@ class IEC(object):
         """
         self.data = data
         self.now = data.index[-1]
-        self.prediction_window = 16 * 60
+        self.prediction_window = prediction_window
         self.algorithms = {
             "Simple Mean": self.simple_mean,
             "Usage Zone Finder": self.usage_zone_finder,

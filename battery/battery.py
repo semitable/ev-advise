@@ -73,7 +73,7 @@ class Battery:
         if soc >= 1:
             return 1
         else:
-            return soc
+            return round(soc, 2)
 
 
 class NissanLeaf(Battery):
@@ -90,9 +90,26 @@ class NissanLeaf(Battery):
 
 class Charger:
     def __init__(self, percent_charged=0.1):
-        self.efficiency = 0.9
+
         self.max_charge = 6.6  # in kw
-        self.action_set = [0, 0.25, 0.5, 0.75, 1]
+
+        boolean_only = False
+        three_actions = False
+        four_actions = False
+
+        if boolean_only:
+            self.action_set = [0, 1]
+            self.efficiency = [1, 0.91]
+        elif three_actions:
+            self.action_set = [0, 0.5, 1]
+            self.efficiency = [0, 0.89, 0.91]
+        elif four_actions:
+            self.action_set = [0, 0.33, 0.66, 1]
+            self.efficiency = [0, 0.88, 0.9, 0.91]
+        else:
+            self.action_set = [0, 0.25, 0.5, 0.75, 1]
+            self.efficiency = [0, 0.85, 0.89, 0.9, 0.91]
+
 
         self.battery = NissanLeaf()
         self.battery.set_open_circuit()
@@ -100,16 +117,27 @@ class Charger:
 
         self.battery.set_charge_percentage(percent_charged)
 
-        self.dt = 0.5
+        self.dt = 1
 
     def charge(self, action, interval):
+
+        if action == 0 or interval == 0:
+            return self.battery.get_soc(), 0
+
+        current_efficiency = self.efficiency[self.action_set.index(action)]
+
         N = int(interval / self.dt)
+        total_charges = N
 
-        for _ in itertools.repeat(None, N):  # todo check how many times this is repeated
-            self.battery.charge(self.efficiency * action * self.max_charge, self.dt)
+        for i in range(N):  # todo check how many times this is repeated
+            self.battery.charge(current_efficiency * action * self.max_charge, self.dt)
 
-        consumption = action * self.max_charge * interval / 60
+            if self.battery.get_soc() >= 1:
+                total_charges = i
+                break
 
-        self.battery.set_charge_percentage(round(self.battery.get_soc(), 3))
+        consumption = (total_charges / N) * action * self.max_charge * interval / 60
+
+        self.battery.set_charge_percentage(self.battery.get_soc())
 
         return self.battery.get_soc(), consumption

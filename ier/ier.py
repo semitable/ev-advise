@@ -24,7 +24,7 @@ class IER(object):
     for a given prediction window using historical data.
     """
 
-    def __init__(self, data, historical_offset):
+    def __init__(self, data, current_time):
         """Initializing the IEC.
 
         Args:
@@ -32,7 +32,12 @@ class IER(object):
             :param historical_offset: offset which will be the current time (will be used as negative)
         """
         self.data = data
-        self.now = data.index[-historical_offset]
+        self.now = current_time
+
+        # cheesy solution to find historical_offset as thanos used it...
+        window_stop_row = data[data.index == current_time].iloc[-1]
+        historical_offset = len(data.index) - data.index.get_loc(window_stop_row.name)
+
         self.prediction_window = 16 * 60
         self.algorithms = {
             "Renes": partial(self.renes, historical_offset=historical_offset),
