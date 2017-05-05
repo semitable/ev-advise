@@ -1,0 +1,31 @@
+
+algorithms:
+    production: 'Renes Hybrid'
+    production_var: 'Renes Hybrid STD'
+    consumption: 'Baseline Finder'
+
+    advise-unit: 'dummy' # 'ev-advise' or 'informed' or 'delayed' or 'informed-delayed'
+
+truth:
+    consumption: 'House Consumption'
+    production: 'WTG Production'
+
+dataset:
+    filename: 'dataset-kw.gz'
+    timezone: 'Europe/Zurich'
+
+adjustment:
+    wtg-scale: 1
+    house-scale: 1
+
+dates:
+    month: 'january' # or 'december'
+
+location: 'US' # or 'US'
+
+random-seed: 1337
+
+battery:
+    soc-range:
+        min: 0.2
+        max: 0.8
