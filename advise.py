@@ -29,7 +29,8 @@ import yaml
 with open("config.yml", 'r') as ymlfile:
 	cfg = yaml.load(ymlfile)
 
-random.seed(cfg['random-seed'])
+# random.seed(cfg['random-seed'])
+random.seed(1337)
 
 if cfg['location'] == 'UK':
 	europe = True
@@ -85,6 +86,7 @@ dataset['WTG Prediction'][datetime.datetime(2012, 12, 1): datetime.datetime(2012
 																							 datetime.datetime(2013, 1,
 																											   20): datetime.datetime(
 																								 2013, 1, 31)]
+random.seed(cfg['random-seed'])
 
 #
 # data = [
@@ -290,13 +292,11 @@ class EVA:
 			self.cons_prediction[time:time + interval][cons_algkey] - self.prod_prediction[time:time + interval][
 				prod_algkey])
 		demand += 60 * (ev_charge / interval_in_minutes)
-		return max(demand.max(), 0)
-
-	#
-	# if interval_in_minutes == 15:
-	#     return max(demand.mean(), 0)
-	# else:
-	#     return max(demand.resample(datetime.timedelta(minutes=15)).mean().max(), 0)
+		# return max(demand.max(), 0)
+		if interval_in_minutes == 15:
+			return max(demand.mean(), 0)
+		else:
+			return max(demand.resample(datetime.timedelta(minutes=15)).mean().max(), 0)
 
 	def shortest_path(self, from_node):
 		"""
@@ -308,14 +308,14 @@ class EVA:
 		if from_node.time >= self.target.time:
 			if from_node.battery < self.target.battery:
 				# this (end) node is acceptable only if we have enough charge in the battery
-				self.g.add_node(from_node, usage_cost=np.inf, demand_cost=np.inf, best_action=None, max_demand=np.inf)
+				self.g.add_node(from_node, usage_cost=np.inf, best_action=None, max_demand=np.inf)
 			return
 
 		if (from_node.battery >= self.target.battery):
 			action_set = [0]
 		else:
 			action_set = self.action_set
-			shuffle(action_set)  # by shuffling we can achieve better pruning
+		# shuffle(action_set)  # by shuffling we can achieve better pruning
 
 		for action in action_set:
 			new_battery, battery_consumption = calc_charge(action, self.interval, from_node.battery)
@@ -359,7 +359,7 @@ class EVA:
 				continue
 
 			if new_node not in self.g:
-				self.g.add_node(new_node, demand_cost=np.inf, usage_cost=np.inf, best_action=None, max_demand=np.inf)
+				self.g.add_node(new_node, usage_cost=np.inf, best_action=None, max_demand=np.inf)
 				self.shortest_path(new_node)
 
 			this_path_usage_cost = self.g.node[new_node]['usage_cost'] + interval_usage_cost
@@ -372,6 +372,7 @@ class EVA:
 							new_node,
 							action=action
 							)
+
 
 			if this_path_cost < self.g.node[from_node]['usage_cost'] + calc_demand_cost(
 							demand_balancer * self.g.node[from_node]['max_demand']):
@@ -475,9 +476,11 @@ class MPC:
 					break
 		if delayed and informed:
 			informed_charge = None
-
 			for action in action_set:
-				max_battery, _ = calc_charge(action, (self.end.time().hour + 2.5) * 60, self.starting_charge)
+
+				max_battery, _ = calc_charge(action,
+											 (self.end.time().hour + 24 - cfg['delay']['hour']) * 60 - cfg['delay'][
+												 'minute'] + self.end.time().minute, self.starting_charge)
 				if max_battery >= 1:
 					informed_charge = action
 					print(informed_charge)
@@ -487,13 +490,15 @@ class MPC:
 			root = Node(current_charge, 0)
 
 			if delayed and informed:
-				if current_time.time() >= datetime.time(21, 30) or current_time.time() <= self.end.time():
+				if current_time.time() >= datetime.time(cfg['delay']['hour'], cfg['delay'][
+					'minute']) or current_time.time() <= self.end.time():
 					action = informed_charge
 				else:
 					action = 0
 
 			elif delayed:
-				if current_time.time() >= datetime.time(21, 30) or current_time.time() <= self.end.time():
+				if current_time.time() >= datetime.time(cfg['delay']['hour'], cfg['delay'][
+					'minute']) or current_time.time() <= self.end.time():
 					action = 1
 				else:
 					action = 0
@@ -562,6 +567,7 @@ class MPC:
 
 
 def generate_arrive_leave_times(start_date, end_date):
+
 	np.random.seed(cfg['random-seed'])
 
 	current_date = start_date

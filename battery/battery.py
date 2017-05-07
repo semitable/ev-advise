@@ -3,9 +3,41 @@
 
 from math import exp, sqrt, pow
 import numpy as np
+from scipy.interpolate import interp1d
 import plotly.offline as py
 import plotly.graph_objs as go
 import itertools
+import yaml
+
+with open("config.yml", 'r') as ymlfile:
+	cfg = yaml.load(ymlfile)
+
+if cfg['battery']['actions'] == 'two':
+	battery_action_set = [0, 1]
+	battery_efficiency = [1, 0.91]
+
+elif cfg['battery']['actions'] == 'five':
+	battery_action_set = [0, 0.25, 0.5, 0.75, 1]
+	battery_efficiency = [0, 0.85, 0.89, 0.9, 0.91]
+
+elif cfg['battery']['actions'] == 'all':
+
+	# interpolating efficiency
+	x = [0.2, 0.25, 0.5, 0.75, 1]
+	y = [0.81, 0.85, 0.89, 0.9, 0.91]
+
+	f = interp1d(x, y)
+
+	battery_action_set = np.linspace(0.2, 1, 81)
+	battery_efficiency = f(battery_action_set)
+
+	battery_action_set = list(battery_action_set)
+	battery_efficiency = list(battery_efficiency)
+
+else:
+	raise ValueError
+
+
 
 
 class Battery:
@@ -93,22 +125,8 @@ class Charger:
 
         self.max_charge = 6.6  # in kw
 
-        boolean_only = False
-        three_actions = False
-        four_actions = False
-
-        if boolean_only:
-            self.action_set = [0, 1]
-            self.efficiency = [1, 0.91]
-        elif three_actions:
-            self.action_set = [0, 0.5, 1]
-            self.efficiency = [0, 0.89, 0.91]
-        elif four_actions:
-            self.action_set = [0, 0.33, 0.66, 1]
-            self.efficiency = [0, 0.88, 0.9, 0.91]
-        else:
-            self.action_set = [0, 0.25, 0.5, 0.75, 1]
-            self.efficiency = [0, 0.85, 0.89, 0.9, 0.91]
+		self.action_set = battery_action_set
+		self.efficiency = battery_efficiency
 
 
         self.battery = NissanLeaf()
