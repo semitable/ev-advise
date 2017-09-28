@@ -10,32 +10,32 @@ import itertools
 import yaml
 
 with open("config.yml", 'r') as ymlfile:
-	cfg = yaml.load(ymlfile)
+    cfg = yaml.load(ymlfile)
 
 if cfg['battery']['actions'] == 'two':
-	battery_action_set = [0, 1]
-	battery_efficiency = [1, 0.91]
+    battery_action_set = [0, 1]
+    battery_efficiency = [1, 0.91]
 
 elif cfg['battery']['actions'] == 'five':
-	battery_action_set = [0, 0.25, 0.5, 0.75, 1]
-	battery_efficiency = [0, 0.85, 0.89, 0.9, 0.91]
+    battery_action_set = [0, 0.25, 0.5, 0.75, 1]
+    battery_efficiency = [0, 0.85, 0.89, 0.9, 0.91]
 
 elif cfg['battery']['actions'] == 'all':
 
-	# interpolating efficiency
-	x = [0.2, 0.25, 0.5, 0.75, 1]
-	y = [0.81, 0.85, 0.89, 0.9, 0.91]
+    # interpolating efficiency
+    x = [0.2, 0.25, 0.5, 0.75, 1]
+    y = [0.81, 0.85, 0.89, 0.9, 0.91]
 
-	f = interp1d(x, y)
+    f = interp1d(x, y)
 
-	battery_action_set = np.linspace(0.2, 1, 81)
-	battery_efficiency = f(battery_action_set)
+    battery_action_set = np.linspace(0.2, 1, 81)
+    battery_efficiency = f(battery_action_set)
 
-	battery_action_set = list(battery_action_set)
-	battery_efficiency = list(battery_efficiency)
+    battery_action_set = list(battery_action_set)
+    battery_efficiency = list(battery_efficiency)
 
 else:
-	raise ValueError
+    raise ValueError
 
 
 
@@ -125,8 +125,8 @@ class Charger:
 
         self.max_charge = 6.6  # in kw
 
-		self.action_set = battery_action_set
-		self.efficiency = battery_efficiency
+        self.action_set = battery_action_set
+        self.efficiency = battery_efficiency
 
 
         self.battery = NissanLeaf()
