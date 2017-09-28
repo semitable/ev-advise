@@ -4,7 +4,7 @@ algorithms:
     production_var: 'Renes Hybrid STD'
     consumption: 'Baseline Finder'
 
-    advise-unit: 'informed' # 'ev-advise' or 'dummy' or 'informed' or 'delayed' or 'informed-delayed'
+    advise-unit: 'ev-advise' # 'ev-advise' or 'dummy' or 'informed' or 'delayed' or 'informed-delayed'
 
 truth:
     consumption: 'House Consumption'
@@ -36,3 +36,5 @@ battery:
 delay:
     hour: 22
     minute: 00
+
+USE_MPC: 'no' # 'yes' or 'no'

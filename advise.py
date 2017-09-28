@@ -395,12 +395,13 @@ class EVA:
 
 
 class MPC:
-	def __init__(self, data, start, end, max_demand=0, starting_charge=0.1):
+	def __init__(self, data, start, end, max_demand=0, starting_charge=0.1, active=True):
 		self.data = data
 		self.start = start
 		self.end = end
 		self.max_starting_demand = max_demand
 		self.starting_charge = starting_charge
+		self.active = active
 
 	def calc_real_usage(self, time, interval, ev_charge):
 		if interval <= 0:
@@ -512,20 +513,37 @@ class MPC:
 				action = informed_charge
 
 			else:
-				advise_unit = EVA(
-					current_time=current_time,
-					target=Node(target_charge, interval * d),
-					interval=interval,
-					action_set=action_set,
-					root=root,
-					starting_max_demand=max_demand
-				)
-				advise_unit.shortest_path(root)
-				path = advise_unit.reconstruct_path()
+				if self.active:
+					advise_unit = EVA(
+						current_time=current_time,
+						target=Node(target_charge, interval * d),
+						interval=interval,
+						action_set=action_set,
+						root=root,
+						starting_max_demand=max_demand
+					)
+					advise_unit.shortest_path(root)
+					path = advise_unit.reconstruct_path()
 
-				# fig = plotly_figure(advise_unit.g, path=path)
-				# py.plot(fig)
-				action = advise_unit.g[path[0]][path[1]]['action']
+					# fig = plotly_figure(advise_unit.g, path=path)
+					# py.plot(fig)
+					action = advise_unit.g[path[0]][path[1]]['action']
+
+				else: # if mpc is not active we will only run ev-advise once
+					if 'advise_unit' not in locals():
+						advise_unit = EVA(
+							current_time=current_time,
+							target=Node(target_charge, interval * d),
+							interval=interval,
+							action_set=action_set,
+							root=root,
+							starting_max_demand=max_demand
+						)
+						advise_unit.shortest_path(root)
+						path = advise_unit.reconstruct_path()
+
+					action = advise_unit.g[path[d]][path[d+1]]['action']
+
 
 			# print(current_charge)
 			current_charge, battery_consumption = calc_charge_with_error(action, interval, current_charge)
@@ -634,7 +652,9 @@ if __name__ == '__main__':
 	for index, t in enumerate(test_times):
 		print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-		mpc = MPC(dataset, t[0], t[1], max_demand=max_demand, starting_charge=t[2])
+		use_mpc = True if cfg['USE_MPC'] == 'yes' else False
+
+		mpc = MPC(dataset, t[0], t[1], max_demand=max_demand, starting_charge=t[2], active=use_mpc)
 		day_usage_cost, day_max_demand, robustness = mpc.run()
 
 		robustness_list.append(robustness)
