@@ -121,7 +121,7 @@ class NissanLeaf(Battery):
 
 
 class Charger:
-    def __init__(self, percent_charged=0.1):
+    def __init__(self):
 
         self.max_charge = 6.6  # in kw
 
@@ -133,9 +133,10 @@ class Charger:
         self.battery.set_open_circuit()
         self.battery.calc_charging_voltage()
 
-        self.battery.set_charge_percentage(percent_charged)
-
         self.dt = 1
+
+    def set_charge(self, percent_charged):
+        self.battery.set_charge_percentage(percent_charged)
 
     def charge(self, action, interval):
 

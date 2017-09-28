@@ -22,7 +22,7 @@ from utils.utils import plotly_figure
 import datetime
 import pytz
 
-from battery.battery import Charger
+import battery.battery
 
 import yaml
 
@@ -169,6 +169,7 @@ print("done ({:0.2f}sec)".format(elapsed))
 
 print(dataset.describe())
 
+Charger = battery.battery.Charger()
 
 def calc_demand_cost(max_demand):
 	return max_demand * 8.03
@@ -179,17 +180,17 @@ def calc_demand_cost(max_demand):
 def calc_charge(action, interval, cur_charge):
 	# Given that Charging rates are in kW and self.interval is in minutes, returns joules
 
-	charger = Charger(cur_charge)
+	Charger.set_charge(cur_charge)
 
-	return charger.charge(action, interval)
+	return Charger.charge(action, interval)
 
 
 def calc_charge_with_error(action, interval, cur_charge):
 	# Given that Charging rates are in kW and self.interval is in minutes, returns joules
 
-	charger = Charger(cur_charge)
+	Charger.set_charge(cur_charge)
 
-	current_charge, battery_consumption = charger.charge(action, interval)
+	current_charge, battery_consumption = Charger.charge(action, interval)
 
 	if current_charge != cur_charge:
 		current_charge += np.random.normal(0, 0.05 * abs((current_charge - cur_charge)) / 3)
@@ -450,7 +451,7 @@ class MPC:
 		interval = 15
 		max_depth = int((self.end - self.start).total_seconds() / (60 * interval))
 
-		action_set = Charger(0).action_set
+		action_set = Charger.action_set
 
 		target_charge = 1
 
