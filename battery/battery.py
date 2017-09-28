@@ -8,6 +8,7 @@ import plotly.offline as py
 import plotly.graph_objs as go
 import itertools
 import yaml
+import datetime
 
 with open("config.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
@@ -119,9 +120,67 @@ class NissanLeaf(Battery):
         self.A = 30.2313
         self.B = 0.91685
 
+class ChargerCache:
+
+    class ChargerCacheKey:
+        def __init__(self, cur_charge, action, interval):
+            self.cur_charge = cur_charge
+            self.action = action
+            self.interval = interval
+
+        def __hash__(self):
+            return hash((self.cur_charge, self.action, self.interval))
+
+        def __eq__(self, other):
+            return (self.cur_charge, self.action, self.interval) == (other.cur_charge, other.action, other.interval)
+
+    def __init__(self):
+        """initializing cache"""
+        self.cache = {}
+        self.max_cache_size = 20000
+
+    def __contains__(self, key):
+        """
+        Returns True or False depending on whether or not the key is in the
+        cache
+        """
+        return key in self.cache
+
+    def update(self, key, value):
+        """
+        Update the cache dictionary and optionally remove the oldest item
+        """
+        if key not in self.cache and len(self.cache) >= self.max_cache_size:
+            self.remove_oldest()
+
+        self.cache[key] = {'date_accessed': datetime.datetime.now(),
+                           'value': value}
+
+    def remove_oldest(self):
+        """
+        Remove the entry that has the oldest accessed date
+        """
+        oldest_entry = None
+        for key in self.cache:
+            if oldest_entry is None:
+                oldest_entry = key
+            elif self.cache[key]['date_accessed'] < self.cache[oldest_entry][
+                'date_accessed']:
+                oldest_entry = key
+        self.cache.pop(oldest_entry)
+
+    @property
+    def size(self):
+        """
+        Return the size of the cache
+        """
+        return len(self.cache)
+
 
 class Charger:
     def __init__(self):
+
+        self.cache = ChargerCache()
 
         self.max_charge = 6.6  # in kw
 
@@ -135,6 +194,9 @@ class Charger:
 
         self.dt = 1
 
+        self.hit = 0
+        self.total = 0
+
     def set_charge(self, percent_charged):
         self.battery.set_charge_percentage(percent_charged)
 
@@ -142,6 +204,14 @@ class Charger:
 
         if action == 0 or interval == 0:
             return self.battery.get_soc(), 0
+
+        self.total +=1
+        # check if value in cache
+        cache_key = ChargerCache.ChargerCacheKey(self.battery.it, action, interval)
+        if(cache_key in self.cache):
+            self.hit += 1
+            return self.cache.cache[cache_key]['value']
+
 
         current_efficiency = self.efficiency[self.action_set.index(action)]
 
@@ -158,5 +228,7 @@ class Charger:
         consumption = (total_charges / N) * action * self.max_charge * interval / 60
 
         self.battery.set_charge_percentage(self.battery.get_soc())
+
+        self.cache.update(cache_key, (self.battery.get_soc(), consumption))
 
         return self.battery.get_soc(), consumption

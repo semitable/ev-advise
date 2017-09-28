@@ -562,6 +562,8 @@ class MPC:
 			current_time = current_time + datetime.timedelta(minutes=interval)
 
 		robustness.append(current_charge)
+
+		print("Battery cache hit: {:0.2f}".format(Charger.hit / Charger.total))
 		print("Battery State: {:0.2f}%".format(100 * current_charge))
 		print("Usage Cost: {:0.2f}$".format(usage_cost))
 		print("Demand Cost: {:0.2f}$".format(calc_demand_cost(max_demand)))
