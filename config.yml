@@ -30,7 +30,7 @@ battery:
         min: 0.2
         max: 0.8
 
-    actions: 'all' # 'all', 'five' or 'two'
+    actions: 'five' # 'all', 'five' or 'two'
 
 
 delay:

@@ -542,7 +542,7 @@ class MPC:
 						advise_unit.shortest_path(root)
 						path = advise_unit.reconstruct_path()
 
-					action = advise_unit.g[path[d]][path[d+1]]['action']
+					action = advise_unit.g[path[max_depth-d]][path[max_depth-d+1]]['action']
 
 
 			# print(current_charge)
