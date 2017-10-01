@@ -17,9 +17,9 @@ from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 
 try:
-	from .easing import *
+    from .easing import *
 except:
-	from easing import *
+    from easing import *
 
 cons_col = 'House Consumption'
 
