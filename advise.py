@@ -248,6 +248,9 @@ class EVA(EVPlanner):
 
         super(EVA, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand)
 
+
+        self.interval_in_minutes = self.interval.total_seconds() // 60
+
         self.g = nx.DiGraph()
 
         self.root = Node(current_battery, 0)
@@ -268,20 +271,18 @@ class EVA(EVPlanner):
     def get_real_time(self, node_time):
         return self.current_time + datetime.timedelta(minutes=node_time)
 
-    def calc_usage_cost(self, time, interval, ev_charge):
+    def calc_usage_cost(self, time, interval: datetime.timedelta, ev_charge):
         """
         Calculates expected cost of house, ev, ier
         :param time: when we start charging
-        :param self.interval: for how long we charge
+        :param interval: for how long we charge
         :param ev_charge: how much we charge the ev
         :return:
         """
-        if interval <= 0:
+
+        interval_in_minutes = interval.total_seconds() // 60
+        if interval_in_minutes <= 0:
             return 0
-
-        interval_in_minutes = interval
-
-        interval = datetime.timedelta(minutes=interval)
 
         m2 = self.prod_prediction[time:time + interval][prod_algkey]
         m1 = self.cons_prediction[time:time + interval][cons_algkey]
@@ -308,12 +309,9 @@ class EVA(EVPlanner):
 
     def calc_max_demand(self, time, interval, ev_charge):
 
-        if interval <= 0 or europe:
+        interval_in_minutes = interval.total_seconds() // 60
+        if interval_in_minutes <= 0 or europe:
             return 0
-        interval_in_minutes = interval
-
-        # time = current_time + datetime.timedelta(minutes=time)
-        interval = datetime.timedelta(minutes=interval)
 
         demand = 60 * (
             self.cons_prediction[time:time + interval][cons_algkey] - self.prod_prediction[time:time + interval][
@@ -349,12 +347,13 @@ class EVA(EVPlanner):
 
             new_node = Node(
                 battery=new_battery,
-                time=from_node.time + self.interval
+                time=from_node.time + self.interval_in_minutes
             )
 
             # there are many instances where we can prune this new node
             # 1. if there's no time left to charge..
-            max_battery, _ = calc_charge(max(self.action_set), self.target.time - new_node.time, new_node.battery)
+            charge_length = datetime.timedelta(minutes=self.target.time - new_node.time)
+            max_battery, _ = calc_charge(max(self.action_set), charge_length, new_node.battery)
             if max_battery < self.target.battery:
                 continue  # skip
 
@@ -364,18 +363,18 @@ class EVA(EVPlanner):
             interval_demand = self.calc_max_demand(self.get_real_time(from_node.time), self.interval,
                                                    battery_consumption)
 
-            demand_balancer = ((self.target.time - from_node.time) / self.billing_period)
+            demand_balancer = ((self.target.time - from_node.time) / (self.billing_period.total_seconds() / 60 ))
             # demand_balancer = datetime.timedelta(days=self.current_time.day) / datetime.timedelta(days=30)
 
-
+            remaining_time = datetime.timedelta(minutes=self.target.time - new_node.time)
             ideal_demand_cost = calc_demand_cost(
                 demand_balancer * max(interval_demand, self.calc_max_demand(self.get_real_time(new_node.time),
-                                                                            self.target.time - new_node.time, 0))
+                                                                            remaining_time, 0))
             )
 
             # 2. (continue pruning) if we are guaranteed to generate a more expensive path
             ideal_remaining_cost = (
-                self.calc_usage_cost(self.get_real_time(new_node.time), self.target.time - new_node.time, 0)
+                self.calc_usage_cost(self.get_real_time(new_node.time), remaining_time, 0)
                 + interval_usage_cost  #
                 + min_charging_cost(self.target.battery - new_node.battery)
                 + ideal_demand_cost  # ideal demand cost from now on
@@ -424,7 +423,9 @@ class EVA(EVPlanner):
         self.shortest_path(self.root)
         path = self.reconstruct_path()
         result = pd.Series(0, index=self.result_index)
-        result[:] = path
+
+        result[:] = [self.g[path[n]][path[n+1]]['action'] for n in range(len(path)-1)]
+        print(result)
         return result
 
 
@@ -491,7 +492,7 @@ class EVAdviseTester:
         self.end = end
         self.max_starting_demand = max_demand
         self.starting_charge = starting_charge
-        self.active_MPC = active_MPC # only relevant for ev-advise
+        self.active_MPC = active_MPC
 
     def calc_real_usage(self, time, interval, ev_charge):
 
@@ -552,37 +553,41 @@ class EVAdviseTester:
 
         robustness = []
 
-        for d in tqdm(range(max_depth, 0, -1)):
+        for d in tqdm(range(max_depth)):
+            if self.active_MPC or 'advise_unit' not in locals():
+                if dummy or informed or delayed:
+                    advise_unit = SimpleEVPlanner(
+                        current_time=current_time,
+                        end_time=self.end,
+                        current_battery=current_charge,
+                        target_battery=target_charge,
+                        interval=interval,
+                        action_set=action_set,
+                        starting_max_demand=max_demand,
+                        is_informed=informed,
+                        is_delayed=delayed
+                    )
 
-            if dummy or informed or delayed:
-                advise_unit = SimpleEVPlanner(
-                    current_time=current_time,
-                    end_time=self.end,
-                    current_battery=current_charge,
-                    target_battery=target_charge,
-                    interval=interval,
-                    action_set=action_set,
-                    starting_max_demand=max_demand,
-                    is_informed=informed,
-                    is_delayed=delayed
-                )
+                else:
+                    advise_unit = EVA(
+                        current_time=current_time,
+                        end_time=self.end,
+                        current_battery=current_charge,
+                        target_battery=target_charge,
+                        interval=interval,
+                        action_set=action_set,
+                        starting_max_demand=max_demand
+                    )
 
-            else:
-                advise_unit = EVA(
-                    current_time=current_time,
-                    end_time=self.end,
-                    current_battery=current_charge,
-                    target_battery=target_charge,
-                    interval=interval,
-                    action_set=action_set,
-                    starting_max_demand=max_demand
-                )
-
-            result = advise_unit.advise()
-            action = result[0]
-
-            print(result)
-            exit(0)
+            if self.active_MPC:
+                result = advise_unit.advise()
+                action = result[0]
+            else:  # if we are not using an mpc
+                try:
+                    action = result[d]
+                except NameError:
+                    result = advise_unit.advise()  # run it once and then just take values
+                    action = result[d]
 
             # print(current_charge)
             current_charge, battery_consumption = calc_charge_with_error(action, interval, current_charge)
