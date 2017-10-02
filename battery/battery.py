@@ -200,7 +200,9 @@ class Charger:
     def set_charge(self, percent_charged):
         self.battery.set_charge_percentage(percent_charged)
 
-    def charge(self, action, interval):
+    def charge(self, action, interval: datetime.timedelta):
+
+        interval = interval.total_seconds() / 60
 
         if action == 0 or interval == 0:
             return self.battery.get_soc(), 0

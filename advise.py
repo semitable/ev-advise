@@ -218,22 +218,48 @@ class Node:
     def __repr__(self):
         return "{0}-{1}".format(self.time, self.battery)
 
+class EVPlanner:
 
-class EVA:
-    def __init__(self, current_time, target, interval, action_set, root=Node(0, 0), starting_max_demand=0):
-
+    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery, interval: datetime.timedelta, action_set, starting_max_demand):
         self.current_time = current_time
+        self.end_time = end_time
+
+        self.current_battery = current_battery
+        self.target_battery = target_battery
+
+        self.interval = interval
+
+        self.action_set = action_set
+
+        self.starting_max_demand = starting_max_demand
+
+        # this is the return index (a pandas datetime index from now to end time with interval for freq)
+        self.result_index = pd.date_range(current_time, end_time-interval, freq=interval)
+
+    def advise(self):
+        """
+        :return: returns a list of actions. should have one action per interval from start time to end time
+        """
+        pass
+
+class EVA(EVPlanner):
+
+    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery, interval: datetime.timedelta, action_set, starting_max_demand):
+
+        super(EVA, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand)
 
         self.g = nx.DiGraph()
-        self.interval = interval
-        self.action_set = action_set
-        self.root = root
-        self.target = target
 
-        self.billing_period = 30 * 24 * 60 / interval  # 30 days
+        self.root = Node(current_battery, 0)
 
-        self.g.add_node(root, usage_cost=np.inf, best_action=None, max_demand=np.inf)
-        self.g.add_node(target, usage_cost=0, best_action=None, max_demand=starting_max_demand)
+        charging_length = (end_time - current_time).total_seconds() // 60 # in minutes
+
+        self.target = Node(target_battery, charging_length)
+
+        self.billing_period = datetime.timedelta(days=30)
+
+        self.g.add_node(self.root, usage_cost=np.inf, best_action=None, max_demand=np.inf)
+        self.g.add_node(self.target, usage_cost=0, best_action=None, max_demand=starting_max_demand)
 
         self.prod_prediction = IER(dataset, current_time).predict([prod_algkey])  # todo check renes predictions plz
         self.cons_prediction = IEC(dataset[:current_time]).predict([cons_algkey])
@@ -394,23 +420,84 @@ class EVA:
 
         return path
 
+    def advise(self):
+        self.shortest_path(self.root)
+        path = self.reconstruct_path()
+        result = pd.Series(0, index=self.result_index)
+        result[:] = path
+        return result
 
-class MPC:
-    def __init__(self, data, start, end, max_demand=0, starting_charge=0.1, active=True):
+
+
+class SimpleEVPlanner(EVPlanner):
+    def __init__(self, current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand, is_informed=False, is_delayed=False):
+        super(SimpleEVPlanner, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand)
+        
+        self._is_informed = is_informed
+        self._is_delayed = is_delayed
+
+        # find what the time delayed start starts
+
+        delayed_cfg_time = datetime.time(cfg['delay']['hour'], cfg['delay']['minute'])
+
+        if current_time.time() > datetime.time(12):  # if we are after noon
+            cur_date = current_time.date()
+        else:
+            cur_date = current_time.date() - datetime.timedelta(days=1)  # else we are probably after midnight
+
+        tz = pytz.timezone(dataset_tz)
+        self.delayed_start_time = tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
+        self.delayed_start_time = tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
+
+    def calc_informed_charge(self):
+        informed_charge = None
+
+        for action in self.action_set:
+            # we should calculate how long we have to charge.
+            # in case of DELAYED we have from max(now, delayed_start) until morning
+            if self._is_delayed:
+                remaining_charge_time = self.end_time - max(self.current_time, self.delayed_start_time)
+            else:
+                remaining_charge_time = self.end_time - self.current_time
+
+            max_battery, _ = calc_charge(action, remaining_charge_time, self.current_battery)
+            if max_battery >= 1:  # we had enough time to fully charge the battery, so we select this value
+                informed_charge = action
+                break
+
+        return informed_charge
+
+    def advise(self):
+
+        result = pd.Series(0, index=self.result_index)
+
+        if self._is_informed:
+            charge_rate = self.calc_informed_charge()
+        else:
+            charge_rate = 1
+
+        if self._is_delayed:
+            result[self.result_index >= self.delayed_start_time] = charge_rate
+        else:
+            result[:] = charge_rate
+
+        return result
+
+
+class EVAdviseTester:
+    def __init__(self, data, start: datetime.datetime, end: datetime.datetime, max_demand=0, starting_charge=0.1, active_MPC=True):
         self.data = data
         self.start = start
         self.end = end
         self.max_starting_demand = max_demand
         self.starting_charge = starting_charge
-        self.active = active
+        self.active_MPC = active_MPC # only relevant for ev-advise
 
     def calc_real_usage(self, time, interval, ev_charge):
-        if interval <= 0:
+
+        interval_in_minutes = interval.total_seconds() / 60
+        if interval_in_minutes <= 0:
             return 0
-
-        interval_in_minutes = interval
-
-        interval = datetime.timedelta(minutes=interval)
 
         m2 = self.data[time:time + interval][real_production_key]
         m1 = self.data[time:time + interval][real_consumption_key]
@@ -428,13 +515,11 @@ class MPC:
 
         return final
 
-    def calc_real_demand(self, time, interval, ev_charge):
-        if interval <= 0 or europe:
+    def calc_real_demand(self, time, interval: datetime.timedelta, ev_charge):
+        interval_in_minutes = interval.total_seconds() / 60
+        if interval_in_minutes <= 0 or europe:
             return 0
-        interval_in_minutes = interval
 
-        # time = current_time + datetime.timedelta(minutes=time)
-        interval = datetime.timedelta(minutes=interval)
 
         demand = 60 * (
             self.data[time:time + interval][real_consumption_key] - self.data[time:time + interval][
@@ -448,8 +533,8 @@ class MPC:
 
     def run(self):
 
-        interval = 15
-        max_depth = int((self.end - self.start).total_seconds() / (60 * interval))
+        interval = datetime.timedelta(minutes=15)
+        max_depth = int((self.end - self.start).total_seconds() / (60 * 15))
 
         action_set = Charger.action_set
 
@@ -467,84 +552,37 @@ class MPC:
 
         robustness = []
 
-        if informed and not delayed:
-            informed_charge = None
-
-            for action in action_set:
-                max_battery, _ = calc_charge(action, max_depth * interval, self.starting_charge)
-                if max_battery >= 1:
-                    informed_charge = action
-                    print(informed_charge)
-                    break
-        if delayed and informed:
-            informed_charge = None
-            for action in action_set:
-
-                max_battery, _ = calc_charge(action,
-                                             (self.end.time().hour + 24 - cfg['delay']['hour']) * 60 - cfg['delay'][
-                                                 'minute'] + self.end.time().minute, self.starting_charge)
-                if max_battery >= 1:
-                    informed_charge = action
-                    print(informed_charge)
-                    break
-
         for d in tqdm(range(max_depth, 0, -1)):
-            root = Node(current_charge, 0)
 
-            if delayed and informed:
-                if current_time.time() >= datetime.time(cfg['delay']['hour'], cfg['delay'][
-                    'minute']) or current_time.time() <= self.end.time():
-                    action = informed_charge
-                else:
-                    action = 0
-
-            elif delayed:
-                if current_time.time() >= datetime.time(cfg['delay']['hour'], cfg['delay'][
-                    'minute']) or current_time.time() <= self.end.time():
-                    action = 1
-                else:
-                    action = 0
-
-            elif dummy:
-                if current_charge < 1:
-                    action = 1
-                else:
-                    action = 0
-            elif informed:
-                action = informed_charge
+            if dummy or informed or delayed:
+                advise_unit = SimpleEVPlanner(
+                    current_time=current_time,
+                    end_time=self.end,
+                    current_battery=current_charge,
+                    target_battery=target_charge,
+                    interval=interval,
+                    action_set=action_set,
+                    starting_max_demand=max_demand,
+                    is_informed=informed,
+                    is_delayed=delayed
+                )
 
             else:
-                if self.active:
-                    advise_unit = EVA(
-                        current_time=current_time,
-                        target=Node(target_charge, interval * d),
-                        interval=interval,
-                        action_set=action_set,
-                        root=root,
-                        starting_max_demand=max_demand
-                    )
-                    advise_unit.shortest_path(root)
-                    path = advise_unit.reconstruct_path()
+                advise_unit = EVA(
+                    current_time=current_time,
+                    end_time=self.end,
+                    current_battery=current_charge,
+                    target_battery=target_charge,
+                    interval=interval,
+                    action_set=action_set,
+                    starting_max_demand=max_demand
+                )
 
-                    # fig = plotly_figure(advise_unit.g, path=path)
-                    # py.plot(fig)
-                    action = advise_unit.g[path[0]][path[1]]['action']
+            result = advise_unit.advise()
+            action = result[0]
 
-                else: # if mpc is not active we will only run ev-advise once
-                    if 'advise_unit' not in locals():
-                        advise_unit = EVA(
-                            current_time=current_time,
-                            target=Node(target_charge, interval * d),
-                            interval=interval,
-                            action_set=action_set,
-                            root=root,
-                            starting_max_demand=max_demand
-                        )
-                        advise_unit.shortest_path(root)
-                        path = advise_unit.reconstruct_path()
-
-                    action = advise_unit.g[path[max_depth-d]][path[max_depth-d+1]]['action']
-
+            print(result)
+            exit(0)
 
             # print(current_charge)
             current_charge, battery_consumption = calc_charge_with_error(action, interval, current_charge)
@@ -552,14 +590,14 @@ class MPC:
             # print(current_charge)
             # print("For time {} to {}, took action {} and charged to: {}".format(advise_unit.get_real_time(0), advise_unit.get_real_time(interval), action, current_charge))
 
-            current_day.loc[current_day.index >= current_time, 'EV'] = battery_consumption / interval
+            current_day.loc[current_day.index >= current_time, 'EV'] = battery_consumption * 60 / interval.total_seconds()
 
             # Taking said action
 
             usage_cost += self.calc_real_usage(current_time, interval, battery_consumption)
             max_demand = max(max_demand, self.calc_real_demand(current_time, interval, battery_consumption))
 
-            current_time = current_time + datetime.timedelta(minutes=interval)
+            current_time = current_time + interval
 
         robustness.append(current_charge)
 
@@ -643,7 +681,7 @@ if __name__ == '__main__':
 
     if first_month:
         test_times = generate_arrive_leave_times(datetime.date(2012, 12, 1),
-                                                 datetime.date(2012, 12, 31))  # second month
+                                                 datetime.date(2012, 12, 31))  # first month
     else:
         test_times = generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31))  # second month
 
@@ -657,7 +695,7 @@ if __name__ == '__main__':
 
         use_mpc = True if cfg['USE_MPC'] == 'yes' else False
 
-        mpc = MPC(dataset, t[0], t[1], max_demand=max_demand, starting_charge=t[2], active=use_mpc)
+        mpc = EVAdviseTester(dataset, t[0], t[1], max_demand=max_demand, starting_charge=t[2], active_MPC=use_mpc)
         day_usage_cost, day_max_demand, robustness = mpc.run()
 
         robustness_list.append(robustness)
@@ -667,9 +705,9 @@ if __name__ == '__main__':
         # creating a 'fake' mpc for the inbetween hours
 
         try:
-            mpc = MPC(dataset, t[1], test_times[index + 1][0], max_demand=max_demand, starting_charge=1)
-            unplugged_demand = mpc.calc_real_demand(mpc.start, (mpc.end - mpc.start).total_seconds() / 60, 0)
-            unplugged_usage = mpc.calc_real_usage(mpc.start, (mpc.end - mpc.start).total_seconds() / 60, 0)
+            mpc = EVAdviseTester(dataset, t[1], test_times[index + 1][0], max_demand=max_demand, starting_charge=1)
+            unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
+            unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
             # print("========", unplugged_demand, max_demand, "===========")
 
