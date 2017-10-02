@@ -171,10 +171,9 @@ print(dataset.describe())
 
 Charger = battery.battery.Charger()
 
+
 def calc_demand_cost(max_demand):
     return max_demand * 8.03
-
-
 
 
 def calc_charge(action, interval, cur_charge):
@@ -218,9 +217,10 @@ class Node:
     def __repr__(self):
         return "{0}-{1}".format(self.time, self.battery)
 
-class EVPlanner:
 
-    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery, interval: datetime.timedelta, action_set, starting_max_demand):
+class EVPlanner:
+    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery,
+                 interval: datetime.timedelta, action_set, starting_max_demand):
         self.current_time = current_time
         self.end_time = end_time
 
@@ -234,7 +234,7 @@ class EVPlanner:
         self.starting_max_demand = starting_max_demand
 
         # this is the return index (a pandas datetime index from now to end time with interval for freq)
-        self.result_index = pd.date_range(current_time, end_time-interval, freq=interval)
+        self.result_index = pd.date_range(current_time, end_time - interval, freq=interval)
 
     def advise(self):
         """
@@ -242,12 +242,13 @@ class EVPlanner:
         """
         pass
 
+
 class EVA(EVPlanner):
+    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery,
+                 interval: datetime.timedelta, action_set, starting_max_demand):
 
-    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery, interval: datetime.timedelta, action_set, starting_max_demand):
-
-        super(EVA, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand)
-
+        super(EVA, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set,
+                                  starting_max_demand)
 
         self.interval_in_minutes = self.interval.total_seconds() // 60
 
@@ -255,7 +256,7 @@ class EVA(EVPlanner):
 
         self.root = Node(current_battery, 0)
 
-        charging_length = (end_time - current_time).total_seconds() // 60 # in minutes
+        charging_length = (end_time - current_time).total_seconds() // 60  # in minutes
 
         self.target = Node(target_battery, charging_length)
 
@@ -303,7 +304,7 @@ class EVA(EVPlanner):
             final = (usage * price).sum()
 
         else:
-            final = ((m1 + ev_charge / interval_in_minutes - m2) * pbuy).sum()  #pbuy == psell
+            final = ((m1 + ev_charge / interval_in_minutes - m2) * pbuy).sum()  # pbuy == psell
 
         return final
 
@@ -363,7 +364,7 @@ class EVA(EVPlanner):
             interval_demand = self.calc_max_demand(self.get_real_time(from_node.time), self.interval,
                                                    battery_consumption)
 
-            demand_balancer = ((self.target.time - from_node.time) / (self.billing_period.total_seconds() / 60 ))
+            demand_balancer = ((self.target.time - from_node.time) / (self.billing_period.total_seconds() / 60))
             # demand_balancer = datetime.timedelta(days=self.current_time.day) / datetime.timedelta(days=30)
 
             remaining_time = datetime.timedelta(minutes=self.target.time - new_node.time)
@@ -399,7 +400,6 @@ class EVA(EVPlanner):
                             action=action
                             )
 
-
             if this_path_cost < self.g.node[from_node]['usage_cost'] + calc_demand_cost(
                             demand_balancer * self.g.node[from_node]['max_demand']):
                 # replace the costs of the current node
@@ -424,16 +424,17 @@ class EVA(EVPlanner):
         path = self.reconstruct_path()
         result = pd.Series(0, index=self.result_index)
 
-        result[:] = [self.g[path[n]][path[n+1]]['action'] for n in range(len(path)-1)]
+        result[:] = [self.g[path[n]][path[n + 1]]['action'] for n in range(len(path) - 1)]
         print(result)
         return result
 
 
-
 class SimpleEVPlanner(EVPlanner):
-    def __init__(self, current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand, is_informed=False, is_delayed=False):
-        super(SimpleEVPlanner, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set, starting_max_demand)
-        
+    def __init__(self, current_time, end_time, current_battery, target_battery, interval, action_set,
+                 starting_max_demand, is_informed=False, is_delayed=False):
+        super(SimpleEVPlanner, self).__init__(current_time, end_time, current_battery, target_battery, interval,
+                                              action_set, starting_max_demand)
+
         self._is_informed = is_informed
         self._is_delayed = is_delayed
 
@@ -486,7 +487,8 @@ class SimpleEVPlanner(EVPlanner):
 
 
 class EVAdviseTester:
-    def __init__(self, data, start: datetime.datetime, end: datetime.datetime, max_demand=0, starting_charge=0.1, active_MPC=True):
+    def __init__(self, data, start: datetime.datetime, end: datetime.datetime, max_demand=0, starting_charge=0.1,
+                 active_MPC=True):
         self.data = data
         self.start = start
         self.end = end
@@ -520,7 +522,6 @@ class EVAdviseTester:
         interval_in_minutes = interval.total_seconds() / 60
         if interval_in_minutes <= 0 or europe:
             return 0
-
 
         demand = 60 * (
             self.data[time:time + interval][real_consumption_key] - self.data[time:time + interval][
@@ -595,7 +596,8 @@ class EVAdviseTester:
             # print(current_charge)
             # print("For time {} to {}, took action {} and charged to: {}".format(advise_unit.get_real_time(0), advise_unit.get_real_time(interval), action, current_charge))
 
-            current_day.loc[current_day.index >= current_time, 'EV'] = battery_consumption * 60 / interval.total_seconds()
+            current_day.loc[
+                current_day.index >= current_time, 'EV'] = battery_consumption * 60 / interval.total_seconds()
 
             # Taking said action
 
@@ -631,7 +633,6 @@ class EVAdviseTester:
 
 
 def generate_arrive_leave_times(start_date, end_date):
-
     np.random.seed(cfg['random-seed'])
 
     current_date = start_date
@@ -777,4 +778,4 @@ if __name__ == '__main__':
 # IPython notebook
 # py.iplot(data, filename='pandas/basic-line-plot')
 
-#py.plot(data)
+# py.plot(data)
