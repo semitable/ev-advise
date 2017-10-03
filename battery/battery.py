@@ -10,7 +10,7 @@ import itertools
 import yaml
 import datetime
 
-with open("config.yml", 'r') as ymlfile:
+with open("config/common.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
 
 if cfg['battery']['actions'] == 'two':

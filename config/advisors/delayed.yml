@@ -1,0 +1,8 @@
+
+advise-unit: 'delayed' # 'ev-advise' or 'dummy' or 'informed' or 'delayed' or 'informed-delayed'
+
+USE_MPC: 'no' # 'yes' or 'no'
+
+delay:
+    hour: 22
+    minute: 00

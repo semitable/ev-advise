@@ -1,0 +1,4 @@
+dates:
+    month: 'january' # 'january' or 'december'
+
+location: 'US' # 'UK' or 'US'

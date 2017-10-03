@@ -1,7 +1,6 @@
 """
 EV advise unit
 """
-import timeit
 from random import shuffle
 import random
 
@@ -18,6 +17,7 @@ from tqdm import tqdm
 from house.iec import IEC
 from ier.ier import IER
 from utils.utils import plotly_figure
+from dataset_builder import build_dataset
 
 import datetime
 import pytz
@@ -26,25 +26,10 @@ import battery.battery
 
 import yaml
 
-with open("config.yml", 'r') as ymlfile:
+
+# some constants (column names)
+with open("config/common.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
-
-# random.seed(cfg['random-seed'])
-random.seed(1337)
-
-if cfg['location'] == 'UK':
-    europe = True
-elif cfg['location'] == 'US':
-    europe = False
-else:
-    raise ValueError
-
-if cfg['dates']['month'] == 'january':
-    first_month = False
-elif cfg['dates']['month'] == 'december':
-    first_month = True
-else:
-    raise ValueError
 
 prod_algkey = cfg['algorithms']['production']
 prod_algkey_var = cfg['algorithms']['production_var']
@@ -53,122 +38,12 @@ cons_algkey = cfg['algorithms']['consumption']
 real_consumption_key = cfg['truth']['consumption']
 real_production_key = cfg['truth']['production']
 
-# cons_algkey_var = 'Baseline Finder Hybrid STD'
+usage_cost_key = cfg['prices']['usage_cost_key']
+sell_price_key = cfg['prices']['sell_price_key']
 
-dataset_filename = cfg['dataset']['filename']
-dataset_tz = cfg['dataset']['timezone']
+del cfg
 
-print("Reading dataset...", end='')
-start_time = timeit.default_timer()
-dataset = pd.read_csv(dataset_filename, parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
-elapsed = timeit.default_timer() - start_time
-print("done ({:0.2f}sec)".format(elapsed))
-
-dataset = dataset[
-          datetime.datetime(2012, 9, 7, 0, 0, 0):]  # trimming the dataset because before that we have bad values
-
-# adjusting our dataset
-
-
-# scaling down the WTG
-dataset['WTG Production'] = cfg['adjustment']['wtg-scale'] * dataset['WTG Production']
-dataset['WTG Prediction'] = cfg['adjustment']['wtg-scale'] * dataset['WTG Prediction']
-
-# #scale up the house
-dataset['House Consumption'] = cfg['adjustment']['house-scale'] * dataset['House Consumption']
-
-# fixing december
-dataset['WTG Production'][datetime.datetime(2012, 12, 1): datetime.datetime(2012, 12, 12)] = dataset['WTG Production'][
-                                                                                             datetime.datetime(2013, 1,
-                                                                                                               20): datetime.datetime(
-                                                                                                 2013, 1, 31)]
-dataset['WTG Prediction'][datetime.datetime(2012, 12, 1): datetime.datetime(2012, 12, 12)] = dataset['WTG Prediction'][
-                                                                                             datetime.datetime(2013, 1,
-                                                                                                               20): datetime.datetime(
-                                                                                                 2013, 1, 31)]
-random.seed(cfg['random-seed'])
-
-#
-# data = [
-#     go.Scatter(
-#         x=dataset.index,  # assign x as the dataframe column 'x'
-#         y=dataset['WTG Production'],
-#         name='WTG Production'
-#     ),
-#     go.Scatter(
-#         x=dataset.index,  # assign x as the dataframe column 'x'
-#         y=dataset['WTG Prediction'] ,
-#         name='WTG Prediction'
-#     ),
-# ]
-# py.plot(data)
-# exit()
-
-
-if cfg['algorithms']['advise-unit'] == 'dummy':
-    dummy = True
-    informed = False
-    delayed = False
-elif cfg['algorithms']['advise-unit'] == 'ev-advise':
-    dummy = False
-    informed = False
-    delayed = False
-elif cfg['algorithms']['advise-unit'] == 'delayed':
-    dummy = False
-    informed = False
-    delayed = True
-elif cfg['algorithms']['advise-unit'] == 'informed':
-    dummy = False
-    informed = True
-    delayed = False
-elif cfg['algorithms']['advise-unit'] == 'informed-delayed':
-    dummy = False
-    informed = True
-    delayed = True
-else:
-    raise ValueError
-
-# Create Usage Cost Column
-usage_cost_key = 'Buy Price'
-sell_price_key = 'Sell Price'
-
-print("Setting up prices...", end='')
-start_time = timeit.default_timer()
-if europe:
-    # https://economy10.files.wordpress.com/2016/12/economy10-com-survey-results-dec-20163.pdf
-    dataset[usage_cost_key] = 0.16  # peak energy
-
-    # off peak hours: https://www.ovoenergy.com/guides/energy-guides/economy-10.html
-    dataset.loc[(dataset.index.time > datetime.time(hour=13, minute=00)) & (
-        dataset.index.time < datetime.time(hour=16, minute=00)), usage_cost_key] = 0.107
-
-    dataset.loc[(dataset.index.time > datetime.time(hour=20, minute=00)) & (
-        dataset.index.time < datetime.time(hour=22, minute=00)), usage_cost_key] = 0.107
-
-    dataset.loc[(dataset.index.time > datetime.time(hour=00, minute=00)) & (
-        dataset.index.time < datetime.time(hour=5, minute=00)), usage_cost_key] = 0.107
-
-    # https://www.gov.uk/feed-in-tariffs/overview
-    dataset[sell_price_key] = 0.0485
-    min_price = 0.0485
-
-else:
-    # summer only: https://www.pge.com/en_US/business/rate-plans/rate-plans/peak-day-pricing/peak-day-pricing.page
-    dataset[usage_cost_key] = 0.202
-    dataset.loc[(dataset.index.time > datetime.time(hour=8, minute=30)) & (
-        dataset.index.time < datetime.time(hour=21, minute=30)), usage_cost_key] = 0.230
-    dataset.loc[(dataset.index.time > datetime.time(hour=12, minute=00)) & (
-        dataset.index.time < datetime.time(hour=18, minute=00)), usage_cost_key] = 0.253
-
-    dataset[usage_cost_key] = dataset[usage_cost_key]
-
-    min_price = 0.202
-
-elapsed = timeit.default_timer() - start_time
-print("done ({:0.2f}sec)".format(elapsed))
-
-print(dataset.describe())
-
+# a global charger to take advantage of result caching
 Charger = battery.battery.Charger()
 
 
@@ -267,7 +142,7 @@ class EVA(EVPlanner):
 
         self.prod_prediction = IER(dataset, current_time).predict([prod_algkey])  # todo check renes predictions plz
         self.cons_prediction = IEC(dataset[:current_time]).predict([cons_algkey])
-        self.prod_prediction.index.tz_convert(pytz.timezone(dataset_tz))
+        self.prod_prediction.index.tz_convert(dataset_tz)
 
     def get_real_time(self, node_time):
         return self.current_time + datetime.timedelta(minutes=node_time)
@@ -296,10 +171,11 @@ class EVA(EVPlanner):
 
         pbuy = dataset[time:time + interval][usage_cost_key]
 
-        if europe:
+        if EUROPE_PRICING:
             psell = dataset[time:time + interval][sell_price_key]
             usage = m1 + ev_charge / interval_in_minutes - m2
             price = pbuy.copy()
+            print(len(price))
             price[usage < 0] = psell
             final = (usage * price).sum()
 
@@ -311,7 +187,7 @@ class EVA(EVPlanner):
     def calc_max_demand(self, time, interval, ev_charge):
 
         interval_in_minutes = interval.total_seconds() // 60
-        if interval_in_minutes <= 0 or europe:
+        if interval_in_minutes <= 0 or EUROPE_PRICING:
             return 0
 
         demand = 60 * (
@@ -425,7 +301,6 @@ class EVA(EVPlanner):
         result = pd.Series(0, index=self.result_index)
 
         result[:] = [self.g[path[n]][path[n + 1]]['action'] for n in range(len(path) - 1)]
-        print(result)
         return result
 
 
@@ -447,9 +322,8 @@ class SimpleEVPlanner(EVPlanner):
         else:
             cur_date = current_time.date() - datetime.timedelta(days=1)  # else we are probably after midnight
 
-        tz = pytz.timezone(dataset_tz)
-        self.delayed_start_time = tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
-        self.delayed_start_time = tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
+        self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
+        self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
 
     def calc_informed_charge(self):
         informed_charge = None
@@ -488,13 +362,15 @@ class SimpleEVPlanner(EVPlanner):
 
 class EVAdviseTester:
     def __init__(self, data, start: datetime.datetime, end: datetime.datetime, max_demand=0, starting_charge=0.1,
-                 active_MPC=True):
+                 active_MPC=True, cfg=None):
         self.data = data
         self.start = start
         self.end = end
         self.max_starting_demand = max_demand
         self.starting_charge = starting_charge
         self.active_MPC = active_MPC
+
+        self._cfg = cfg
 
     def calc_real_usage(self, time, interval, ev_charge):
 
@@ -506,7 +382,7 @@ class EVAdviseTester:
         m1 = self.data[time:time + interval][real_consumption_key]
 
         pbuy = dataset[time:time + interval][usage_cost_key]
-        if europe:
+        if EUROPE_PRICING:
             psell = dataset[time:time + interval][sell_price_key]
             usage = m1 + ev_charge / interval_in_minutes - m2
             price = pbuy.copy()
@@ -520,7 +396,7 @@ class EVAdviseTester:
 
     def calc_real_demand(self, time, interval: datetime.timedelta, ev_charge):
         interval_in_minutes = interval.total_seconds() / 60
-        if interval_in_minutes <= 0 or europe:
+        if interval_in_minutes <= 0 or EUROPE_PRICING:
             return 0
 
         demand = 60 * (
@@ -556,7 +432,7 @@ class EVAdviseTester:
 
         for d in tqdm(range(max_depth)):
             if self.active_MPC or 'advise_unit' not in locals():
-                if dummy or informed or delayed:
+                if cfg['advise-unit'] != 'ev-advise':
                     advise_unit = SimpleEVPlanner(
                         current_time=current_time,
                         end_time=self.end,
@@ -565,8 +441,8 @@ class EVAdviseTester:
                         interval=interval,
                         action_set=action_set,
                         starting_max_demand=max_demand,
-                        is_informed=informed,
-                        is_delayed=delayed
+                        is_informed=(cfg['advise-unit'] in ['informed', 'informed-delayed']),
+                        is_delayed=(cfg['advise-unit'] in ['delayed', 'informed-delayed'])
                     )
 
                 else:
@@ -632,13 +508,8 @@ class EVAdviseTester:
         return usage_cost, max_demand, robustness
 
 
-def generate_arrive_leave_times(start_date, end_date):
-    np.random.seed(cfg['random-seed'])
-
+def generate_arrive_leave_times(start_date, end_date, tz):
     current_date = start_date
-
-    timezone = pytz.timezone(dataset_tz)
-
     time_list = []
 
     while (current_date < end_date):
@@ -663,8 +534,9 @@ def generate_arrive_leave_times(start_date, end_date):
         end_time = current_datetime + datetime.timedelta(days=1, minutes=end_minutes)
 
         # putting timezone info
-        start_time = start_time.replace(tzinfo=timezone)
-        end_time = end_time.replace(tzinfo=timezone)
+
+        start_time = tz.localize(start_time)
+        end_time = tz.localize(end_time)
 
         soc = np.random.uniform(cfg['battery']['soc-range']['min'], cfg['battery']['soc-range']['max'])
 
@@ -683,13 +555,33 @@ def generate_arrive_leave_times(start_date, end_date):
 
 
 if __name__ == '__main__':
-    # time = dataset.index[-historical_offset]
 
-    if first_month:
-        test_times = generate_arrive_leave_times(datetime.date(2012, 12, 1),
-                                                 datetime.date(2012, 12, 31))  # first month
+    # first lets build our configuration
+    cfg_filenames = ['config/common.yml', 'config/tests/dec_us.yml', 'config/advisors/delayed.yml']
+
+    cfg = {}
+
+    for f in cfg_filenames:
+        with open(f, 'r') as ymlfile:
+            cfg.update(yaml.load(ymlfile))
+
+    # dont forget to seed our RNG!
+    random.seed(cfg['random-seed'])
+
+    # generate arrive/leave times for relevant month
+    dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
+
+    if cfg['dates']['month'] == 'january':
+        generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31), dataset_tz)
+    elif cfg['dates']['month'] == 'december':
+        test_times = generate_arrive_leave_times(datetime.date(2012, 12, 1), datetime.date(2012, 12, 31), dataset_tz)
     else:
-        test_times = generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31))  # second month
+        raise ValueError
+
+    # build our dataset
+    dataset = build_dataset(cfg)
+
+    EUROPE_PRICING = cfg['location'] == 'UK'
 
     usage_cost = 0
     max_demand = 0
