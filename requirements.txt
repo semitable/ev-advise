@@ -10,7 +10,7 @@ jupyter-core==4.3.0
 matplotlib==2.0.2
 nbformat==4.4.0
 networkx==2.0
-numpy==1.13.2
+numpy==1.13.3
 pandas==0.20.3
 paramz==0.7.4
 patsy==0.4.1
