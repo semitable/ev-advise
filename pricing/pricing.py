@@ -23,7 +23,7 @@ class PricingModel:
     def setup_prices(self):
         raise NotImplemented()
 
-    def __init__(self, pricing_model_type, time_index: pd.DatetimeIndex):
+    def __init__(self, time_index: pd.DatetimeIndex):
 
         self._billing_period = None
 

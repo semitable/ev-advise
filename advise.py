@@ -88,7 +88,7 @@ class Node:
 
 class EVPlanner:
     def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery,
-                 interval: datetime.timedelta, action_set, starting_max_demand):
+                 interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.pricing.PricingModel):
         self.current_time = current_time
         self.end_time = end_time
 
@@ -105,11 +105,7 @@ class EVPlanner:
         self.result_index = pd.date_range(current_time, end_time - interval, freq=interval)
 
         # pricing model
-        self.pricing_index = pd.date_range(current_time, end_time, freq='T')
-        if (EUROPE_PRICING):
-            self._pricing_model = pricing.pricing.PricingModel('UK_PRICING', self.pricing_index)
-        else:
-            self._pricing_model = pricing.pricing.PricingModel('US_PRICING', self.pricing_index)
+        self._pricing_model = pricing_model
 
     def advise(self):
         """
@@ -120,10 +116,10 @@ class EVPlanner:
 
 class EVA(EVPlanner):
     def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery,
-                 interval: datetime.timedelta, action_set, starting_max_demand):
+                 interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.pricing.PricingModel):
 
         super(EVA, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set,
-                                  starting_max_demand)
+                                  starting_max_demand, pricing_model)
 
         self.interval_in_minutes = self.interval.total_seconds() // 60
 
@@ -171,7 +167,9 @@ class EVA(EVPlanner):
     def calc_max_demand(self, time, interval, ev_charge):
 
         interval_in_minutes = interval.total_seconds() // 60
-        if interval_in_minutes <= 0 or EUROPE_PRICING:
+
+        # optimization for no-max demand pricing model since we don't actually care if there are no demand prices
+        if interval_in_minutes <= 0 or not self._pricing_model.has_demand_prices():
             return 0
 
         demand = 60 * (
@@ -290,9 +288,9 @@ class EVA(EVPlanner):
 
 class SimpleEVPlanner(EVPlanner):
     def __init__(self, current_time, end_time, current_battery, target_battery, interval, action_set,
-                 starting_max_demand, is_informed=False, is_delayed=False):
+                 starting_max_demand, pricing_model: pricing.pricing.PricingModel, is_informed=False, is_delayed=False):
         super(SimpleEVPlanner, self).__init__(current_time, end_time, current_battery, target_battery, interval,
-                                              action_set, starting_max_demand)
+                                              action_set, starting_max_demand, pricing_model)
 
         self._is_informed = is_informed
         self._is_delayed = is_delayed
@@ -344,8 +342,8 @@ class SimpleEVPlanner(EVPlanner):
         return result
 
 
-class EVAdviseTester:
-    def __init__(self, data, start: datetime.datetime, end: datetime.datetime, max_demand=0, starting_charge=0.1,
+class DaySimulator:
+    def __init__(self, data, start: datetime.datetime, end: datetime.datetime, pricing_model: pricing.pricing.PricingModel, max_demand=0, starting_charge=0.1,
                  active_MPC=True, cfg=None):
         self.data = data
         self.start = start
@@ -356,6 +354,9 @@ class EVAdviseTester:
 
         self._cfg = cfg
 
+        self._pricing_model = pricing_model
+
+
     def calc_real_usage(self, time, interval, ev_charge):
 
         interval_in_minutes = interval.total_seconds() / 60
@@ -365,22 +366,14 @@ class EVAdviseTester:
         m2 = self.data[time:time + interval][real_production_key]
         m1 = self.data[time:time + interval][real_consumption_key]
 
-        pbuy = dataset[time:time + interval][usage_cost_key]
-        if EUROPE_PRICING:
-            psell = dataset[time:time + interval][sell_price_key]
-            usage = m1 + ev_charge / interval_in_minutes - m2
-            price = pbuy.copy()
-            price[usage < 0] = psell
-            final = (usage * price).sum()
+        usage = m1 + ev_charge / interval_in_minutes - m2
 
-        else:
-            final = ((m1 + ev_charge / interval_in_minutes - m2) * pbuy).sum()  # pbuy == psell
+        return self._pricing_model.get_usage_cost(usage)
 
-        return final
 
     def calc_real_demand(self, time, interval: datetime.timedelta, ev_charge):
         interval_in_minutes = interval.total_seconds() / 60
-        if interval_in_minutes <= 0 or EUROPE_PRICING:
+        if interval_in_minutes <= 0 or not self._pricing_model.has_demand_prices():
             return 0
 
         demand = 60 * (
@@ -425,6 +418,7 @@ class EVAdviseTester:
                         interval=interval,
                         action_set=action_set,
                         starting_max_demand=max_demand,
+                        pricing_model=self._pricing_model,
                         is_informed=(cfg['advise-unit'] in ['informed', 'informed-delayed']),
                         is_delayed=(cfg['advise-unit'] in ['delayed', 'informed-delayed'])
                     )
@@ -437,7 +431,8 @@ class EVAdviseTester:
                         target_battery=target_charge,
                         interval=interval,
                         action_set=action_set,
-                        starting_max_demand=max_demand
+                        starting_max_demand=max_demand,
+                        pricing_model=self._pricing_model
                     )
 
             if self.active_MPC:
@@ -468,11 +463,11 @@ class EVAdviseTester:
 
         robustness.append(current_charge)
 
-        print("Battery cache hit: {:0.2f}".format(Charger.hit / Charger.total))
-        print("Battery State: {:0.2f}%".format(100 * current_charge))
-        print("Usage Cost: {:0.2f}$".format(usage_cost))
-        print("Demand Cost: {:0.2f}$".format(calc_demand_cost(max_demand)))
-        print("Final Cost: {:0.2f}$".format(usage_cost + calc_demand_cost(max_demand)))
+        # print("Battery cache hit: {:0.2f}".format(Charger.hit / Charger.total))
+        # print("Battery State: {:0.2f}%".format(100 * current_charge))
+        # print("Usage Cost: {:0.2f}$".format(usage_cost))
+        # print("Demand Cost: {:0.2f}$".format(self._pricing_model.get_demand_cost(max_demand)))
+        # print("Final Cost: {:0.2f}$".format(usage_cost + self._pricing_model.get_demand_cost(max_demand)))
 
         # data = [
         #     go.Scatter(
@@ -556,7 +551,7 @@ if __name__ == '__main__':
     dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
 
     if cfg['dates']['month'] == 'january':
-        generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31), dataset_tz)
+        test_times = generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31), dataset_tz)
     elif cfg['dates']['month'] == 'december':
         test_times = generate_arrive_leave_times(datetime.date(2012, 12, 1), datetime.date(2012, 12, 31), dataset_tz)
     else:
@@ -565,7 +560,11 @@ if __name__ == '__main__':
     # build our dataset
     dataset = build_dataset(cfg)
 
-    EUROPE_PRICING = cfg['location'] == 'UK'
+
+    if (cfg['location'] == 'UK'):
+        pricing_model = pricing.pricing.EuropePricingModel(dataset.index)
+    else:
+        pricing_model = pricing.pricing.USPricingModel(dataset.index)
 
     usage_cost = 0
     max_demand = 0
@@ -577,7 +576,7 @@ if __name__ == '__main__':
 
         use_mpc = True if cfg['USE_MPC'] == 'yes' else False
 
-        mpc = EVAdviseTester(dataset, t[0], t[1], max_demand=max_demand, starting_charge=t[2], active_MPC=use_mpc)
+        mpc = DaySimulator(dataset, t[0], t[1], pricing_model, max_demand=max_demand, starting_charge=t[2], active_MPC=use_mpc)
         day_usage_cost, day_max_demand, robustness = mpc.run()
 
         robustness_list.append(robustness)
@@ -587,7 +586,7 @@ if __name__ == '__main__':
         # creating a 'fake' mpc for the inbetween hours
 
         try:
-            mpc = EVAdviseTester(dataset, t[1], test_times[index + 1][0], max_demand=max_demand, starting_charge=1)
+            mpc = DaySimulator(dataset, t[1], test_times[index + 1][0], pricing_model, max_demand=max_demand, starting_charge=1)
             unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
             unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
@@ -603,8 +602,8 @@ if __name__ == '__main__':
 
     print("Robustness: {:0.2f}%".format(100 * np.mean(robustness_list)))
     print("Usage Cost: {:0.2f}$".format(usage_cost))
-    print("Demand Cost: {:0.2f}$".format(calc_demand_cost(max_demand)))
-    print("Final Cost: {:0.2f}$".format(usage_cost + calc_demand_cost(max_demand)))
+    print("Demand Cost: {:0.2f}$".format(pricing_model.get_demand_cost(max_demand)))
+    print("Final Cost: {:0.2f}$".format(usage_cost + pricing_model.get_demand_cost(max_demand)))
 
 
 
