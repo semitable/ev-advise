@@ -26,6 +26,7 @@ import battery.battery
 
 import yaml
 
+import pricing.pricing
 
 # some constants (column names)
 with open("config/common.yml", 'r') as ymlfile:
@@ -47,10 +48,6 @@ del cfg
 Charger = battery.battery.Charger()
 
 
-def calc_demand_cost(max_demand):
-    return max_demand * 8.03
-
-
 def calc_charge(action, interval, cur_charge):
     # Given that Charging rates are in kW and self.interval is in minutes, returns joules
 
@@ -70,10 +67,6 @@ def calc_charge_with_error(action, interval, cur_charge):
         current_charge += np.random.normal(0, 0.05 * abs((current_charge - cur_charge)) / 3)
 
     return current_charge, battery_consumption
-
-
-def min_charging_cost(charge):
-    return min_price * charge
 
 
 class Node:
@@ -110,6 +103,13 @@ class EVPlanner:
 
         # this is the return index (a pandas datetime index from now to end time with interval for freq)
         self.result_index = pd.date_range(current_time, end_time - interval, freq=interval)
+
+        # pricing model
+        self.pricing_index = pd.date_range(current_time, end_time, freq='T')
+        if (EUROPE_PRICING):
+            self._pricing_model = pricing.pricing.PricingModel('UK_PRICING', self.pricing_index)
+        else:
+            self._pricing_model = pricing.pricing.PricingModel('US_PRICING', self.pricing_index)
 
     def advise(self):
         """
@@ -163,26 +163,10 @@ class EVA(EVPlanner):
         m2 = self.prod_prediction[time:time + interval][prod_algkey]
         m1 = self.cons_prediction[time:time + interval][cons_algkey]
 
-        # usage = pd.DataFrame()
-        #
-        # usage['p'] = m2
-        # usage['c'] = m1
-        # usage['e'] = ev_charge / interval_in_minutes
+        usage = m1 + ev_charge / interval_in_minutes - m2
 
-        pbuy = dataset[time:time + interval][usage_cost_key]
+        return self._pricing_model.get_usage_cost(usage)
 
-        if EUROPE_PRICING:
-            psell = dataset[time:time + interval][sell_price_key]
-            usage = m1 + ev_charge / interval_in_minutes - m2
-            price = pbuy.copy()
-            print(len(price))
-            price[usage < 0] = psell
-            final = (usage * price).sum()
-
-        else:
-            final = ((m1 + ev_charge / interval_in_minutes - m2) * pbuy).sum()  # pbuy == psell
-
-        return final
 
     def calc_max_demand(self, time, interval, ev_charge):
 
@@ -244,7 +228,7 @@ class EVA(EVPlanner):
             # demand_balancer = datetime.timedelta(days=self.current_time.day) / datetime.timedelta(days=30)
 
             remaining_time = datetime.timedelta(minutes=self.target.time - new_node.time)
-            ideal_demand_cost = calc_demand_cost(
+            ideal_demand_cost = self._pricing_model.get_demand_cost(
                 demand_balancer * max(interval_demand, self.calc_max_demand(self.get_real_time(new_node.time),
                                                                             remaining_time, 0))
             )
@@ -253,11 +237,11 @@ class EVA(EVPlanner):
             ideal_remaining_cost = (
                 self.calc_usage_cost(self.get_real_time(new_node.time), remaining_time, 0)
                 + interval_usage_cost  #
-                + min_charging_cost(self.target.battery - new_node.battery)
+                + self._pricing_model.ideal_charging_cost(self.target.battery - new_node.battery)
                 + ideal_demand_cost  # ideal demand cost from now on
             )
 
-            if self.g.node[from_node]['usage_cost'] + calc_demand_cost(
+            if self.g.node[from_node]['usage_cost'] + self._pricing_model.get_demand_cost(
                             demand_balancer * self.g.node[from_node]['max_demand']) < ideal_remaining_cost:
                 continue
 
@@ -267,7 +251,7 @@ class EVA(EVPlanner):
 
             this_path_usage_cost = self.g.node[new_node]['usage_cost'] + interval_usage_cost
             this_path_demand = max(self.g.node[new_node]['max_demand'], interval_demand)
-            this_path_demand_cost = calc_demand_cost(demand_balancer * this_path_demand)
+            this_path_demand_cost =  self._pricing_model.get_demand_cost(demand_balancer * this_path_demand)
 
             this_path_cost = this_path_usage_cost + this_path_demand_cost
 
@@ -276,7 +260,7 @@ class EVA(EVPlanner):
                             action=action
                             )
 
-            if this_path_cost < self.g.node[from_node]['usage_cost'] + calc_demand_cost(
+            if this_path_cost < self.g.node[from_node]['usage_cost'] +  self._pricing_model.get_demand_cost(
                             demand_balancer * self.g.node[from_node]['max_demand']):
                 # replace the costs of the current node
                 self.g.add_node(from_node,
@@ -557,7 +541,7 @@ def generate_arrive_leave_times(start_date, end_date, tz):
 if __name__ == '__main__':
 
     # first lets build our configuration
-    cfg_filenames = ['config/common.yml', 'config/tests/dec_us.yml', 'config/advisors/delayed.yml']
+    cfg_filenames = ['config/common.yml', 'config/tests/dec_us.yml', 'config/advisors/smartcharge.yml']
 
     cfg = {}
 
