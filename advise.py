@@ -12,14 +12,14 @@ import pytz
 import yaml
 from tqdm import tqdm
 
-import battery.battery
 import pricing.pricing
+from battery.battery import Charger as ChargerClass
 from dataset_builder import build_dataset
 from house.iec import IEC
 from ier.ier import IER
 
 # a global charger to take advantage of result caching
-Charger = battery.battery.Charger()
+Charger = ChargerClass()
 
 
 def calc_charge(action, interval, cur_charge):
