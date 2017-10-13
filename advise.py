@@ -262,24 +262,22 @@ class EVA(EVPlanner):
 
 class SimpleEVPlanner(EVPlanner):
     def __init__(self, current_time, end_time, current_battery, target_battery, interval, action_set,
-                 starting_max_demand, pricing_model: pricing.pricing.PricingModel, is_informed=False, is_delayed=False):
+                 starting_max_demand, pricing_model: pricing.pricing.PricingModel, is_informed=False, is_delayed=False,
+                 delayed_start=None):
+
         super(SimpleEVPlanner, self).__init__(current_time, end_time, current_battery, target_battery, interval,
                                               action_set, starting_max_demand, pricing_model)
 
         self._is_informed = is_informed
         self._is_delayed = is_delayed
 
-        # find what the time delayed start starts
-
-        delayed_cfg_time = datetime.time(cfg['delay']['hour'], cfg['delay']['minute'])
-
         if current_time.time() > datetime.time(12):  # if we are after noon
             cur_date = current_time.date()
         else:
             cur_date = current_time.date() - datetime.timedelta(days=1)  # else we are probably after midnight
 
-        self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
-        self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_cfg_time))
+        if (is_delayed):
+            self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_start))
 
     def calc_informed_charge(self):
         informed_charge = None
@@ -396,7 +394,12 @@ class DaySimulator:
                         starting_max_demand=max_demand,
                         pricing_model=self._pricing_model,
                         is_informed=(self._cfg['advise-unit'] in ['informed', 'informed-delayed']),
-                        is_delayed=(self._cfg['advise-unit'] in ['delayed', 'informed-delayed'])
+                        is_delayed=(self._cfg['advise-unit'] in ['delayed', 'informed-delayed']),
+                        delayed_start=datetime.time(hour=self._cfg['delay']['hour'],
+                                                    minute=self._cfg['delay']['minute']) if self._cfg[
+                                                                                                'advise-unit'] in [
+                                                                                                'delayed',
+                                                                                                'informed-delayed'] else None
                     )
 
                 else:
@@ -623,9 +626,9 @@ def main():
     elif (args.informed):
         cfg_filenames.append('config/advisors/informed.yml')
     elif (args.delayed):
-        cfg_filenames.append('config/advisors/informed.yml')
+        cfg_filenames.append('config/advisors/delayed.yml')
     elif (args.informed_delayed):
-        cfg_filenames.append('config/advisors/informed.yml')
+        cfg_filenames.append('config/advisors/informed_delayed.yml')
 
     cfg = {}
 
