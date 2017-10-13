@@ -1,32 +1,21 @@
 """
 EV advise unit
 """
-from random import shuffle
+import datetime
 import random
 
 import networkx as nx
 import numpy as np
-
-import plotly.offline as py
-import plotly.graph_objs as go
-
 import pandas as pd
-
+import pytz
+import yaml
 from tqdm import tqdm
 
+import battery.battery
+import pricing.pricing
+from dataset_builder import build_dataset
 from house.iec import IEC
 from ier.ier import IER
-from utils.utils import plotly_figure
-from dataset_builder import build_dataset
-
-import datetime
-import pytz
-
-import battery.battery
-
-import yaml
-
-import pricing.pricing
 
 # some constants (column names)
 with open("config/common.yml", 'r') as ymlfile:
@@ -38,9 +27,6 @@ cons_algkey = cfg['algorithms']['consumption']
 
 real_consumption_key = cfg['truth']['consumption']
 real_production_key = cfg['truth']['production']
-
-usage_cost_key = cfg['prices']['usage_cost_key']
-sell_price_key = cfg['prices']['sell_price_key']
 
 del cfg
 
@@ -488,51 +474,122 @@ class DaySimulator:
         return usage_cost, max_demand, robustness
 
 
-def generate_arrive_leave_times(start_date, end_date, tz):
+class BillingPeriodSimulator:
+    def __init__(self, cfg):
+        self._cfg = cfg
 
-    current_date = start_date
-    time_list = []
+        if (cfg['location'] == 'UK'):
+            self.pricing_model = pricing.pricing.EuropePricingModel(dataset.index)
+        else:
+            self.pricing_model = pricing.pricing.USPricingModel(dataset.index)
 
-    while (current_date < end_date):
+        if cfg['dates']['month'] == 'january':
+            self.test_times = self.generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31),
+                                                               dataset_tz)
+        elif cfg['dates']['month'] == 'december':
+            self.test_times = self.generate_arrive_leave_times(datetime.date(2012, 12, 1), datetime.date(2012, 12, 31),
+                                                               dataset_tz)
+        else:
+            raise ValueError
 
-        current_datetime = datetime.datetime.combine(current_date, datetime.time())
+        self.usage_cost = 0
+        self.max_demand = 0
+        self.robustness_list = []
 
-        # mean/std as taken from: Stochastic Optimal Energy Management of Smart Home with PEV Energy Storage
+    def run(self):
 
-        end_minutes = np.random.normal(460, 34.2)
-        start_minutes = np.random.normal(1118, 53.4)
+        for index, t in enumerate(self.test_times):
+            print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-        # round to fifteen (minutes)
-        base = 15
-        round_to_fifteen = lambda x: int(base * round(float(x) / base))
+            use_mpc = True if cfg['USE_MPC'] == 'yes' else False
 
-        start_minutes = round_to_fifteen(start_minutes)
-        end_minutes = round_to_fifteen(end_minutes)
+            mpc = DaySimulator(dataset, t[0], t[1], self.pricing_model, max_demand=self.max_demand,
+                               starting_charge=t[2],
+                               active_MPC=use_mpc)
+            day_usage_cost, day_max_demand, robustness = mpc.run()
 
-        # creating datetime
+            self.robustness_list.append(robustness)
 
-        start_time = current_datetime + datetime.timedelta(minutes=start_minutes)
-        end_time = current_datetime + datetime.timedelta(days=1, minutes=end_minutes)
+            max_demand = max(self.max_demand, day_max_demand)
 
-        # putting timezone info
+            # creating a 'fake' mpc for the inbetween hours
 
-        start_time = tz.localize(start_time)
-        end_time = tz.localize(end_time)
+            try:
+                mpc = DaySimulator(dataset, t[1], self.test_times[index + 1][0], self.pricing_model,
+                                   max_demand=max_demand,
+                                   starting_charge=1)
+                unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
+                unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
-        soc = np.random.uniform(cfg['battery']['soc-range']['min'], cfg['battery']['soc-range']['max'])
+                # print("========", unplugged_demand, max_demand, "===========")
 
-        # print("{} to {}".format(start_time, end_time))
-        # print(end_time-start_time)
+                max_demand = max(max_demand, unplugged_demand)
+                self.usage_cost += unplugged_usage
+            except IndexError:
+                # our period is over :-)
+                pass
 
-        # quality control
-        if (end_time - start_time > datetime.timedelta(hours=15) or end_time - start_time < datetime.timedelta(
-                hours=8)):
-            continue
+            self.usage_cost += day_usage_cost
 
-        time_list.append((start_time, end_time, soc))
-        current_date += datetime.timedelta(days=1)
+    def print_description(self):
+        print('Location: {}'.format(self._cfg['location']))
+        print('Month: {}'.format(self._cfg['dates']['month']))
+        print('Agent: {}'.format(self._cfg['advise-unit']))
+        if (self._cfg['advise-unit'] in ['delayed', 'informed-delayed']):
+            print('Delayed Start: {}:{}'.format(self._cfg['delay']['hour'], self._cfg['delay']['minute']))
 
-    return time_list
+    def print_results(self):
+
+        print("Robustness: {:0.2f}%".format(100 * np.mean(self.robustness_list)))
+        print("Usage Cost: {:0.2f}$".format(self.usage_cost))
+        print("Demand Cost: {:0.2f}$".format(self.pricing_model.get_demand_cost(self.max_demand)))
+        print("Final Cost: {:0.2f}$".format(self.usage_cost + self.pricing_model.get_demand_cost(self.max_demand)))
+
+    def generate_arrive_leave_times(self, start_date, end_date, tz):
+
+        current_date = start_date
+        time_list = []
+
+        while (current_date < end_date):
+
+            current_datetime = datetime.datetime.combine(current_date, datetime.time())
+
+            # mean/std as taken from: Stochastic Optimal Energy Management of Smart Home with PEV Energy Storage
+
+            end_minutes = np.random.normal(460, 34.2)
+            start_minutes = np.random.normal(1118, 53.4)
+
+            # round to fifteen (minutes)
+            base = 15
+            round_to_fifteen = lambda x: int(base * round(float(x) / base))
+
+            start_minutes = round_to_fifteen(start_minutes)
+            end_minutes = round_to_fifteen(end_minutes)
+
+            # creating datetime
+
+            start_time = current_datetime + datetime.timedelta(minutes=start_minutes)
+            end_time = current_datetime + datetime.timedelta(days=1, minutes=end_minutes)
+
+            # putting timezone info
+
+            start_time = tz.localize(start_time)
+            end_time = tz.localize(end_time)
+
+            soc = np.random.uniform(cfg['battery']['soc-range']['min'], cfg['battery']['soc-range']['max'])
+
+            # print("{} to {}".format(start_time, end_time))
+            # print(end_time-start_time)
+
+            # quality control
+            if (end_time - start_time > datetime.timedelta(hours=15) or end_time - start_time < datetime.timedelta(
+                    hours=8)):
+                continue
+
+            time_list.append((start_time, end_time, soc))
+            current_date += datetime.timedelta(days=1)
+
+        return time_list
 
 
 if __name__ == '__main__':
@@ -553,109 +610,12 @@ if __name__ == '__main__':
     # generate arrive/leave times for relevant month
     dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
 
-    if cfg['dates']['month'] == 'january':
-        test_times = generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31), dataset_tz)
-    elif cfg['dates']['month'] == 'december':
-        test_times = generate_arrive_leave_times(datetime.date(2012, 12, 1), datetime.date(2012, 12, 31), dataset_tz)
-    else:
-        raise ValueError
-
     #print(pd.DataFrame(test_times, columns=['Start Time', 'End Time', 'SoC']))
 
     # build our dataset
     dataset = build_dataset(cfg)
 
-
-    if (cfg['location'] == 'UK'):
-        pricing_model = pricing.pricing.EuropePricingModel(dataset.index)
-    else:
-        pricing_model = pricing.pricing.USPricingModel(dataset.index)
-
-    usage_cost = 0
-    max_demand = 0
-
-    robustness_list = []
-
-    for index, t in enumerate(test_times):
-        print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
-
-        use_mpc = True if cfg['USE_MPC'] == 'yes' else False
-
-        mpc = DaySimulator(dataset, t[0], t[1], pricing_model, max_demand=max_demand, starting_charge=t[2], active_MPC=use_mpc)
-        day_usage_cost, day_max_demand, robustness = mpc.run()
-
-        robustness_list.append(robustness)
-
-        max_demand = max(max_demand, day_max_demand)
-
-        # creating a 'fake' mpc for the inbetween hours
-
-        try:
-            mpc = DaySimulator(dataset, t[1], test_times[index + 1][0], pricing_model, max_demand=max_demand, starting_charge=1)
-            unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
-            unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
-
-            # print("========", unplugged_demand, max_demand, "===========")
-
-            max_demand = max(max_demand, unplugged_demand)
-            usage_cost += unplugged_usage
-        except IndexError:
-            # our period is over :-)
-            pass
-
-        usage_cost += day_usage_cost
-
-    print("Robustness: {:0.2f}%".format(100 * np.mean(robustness_list)))
-    print("Usage Cost: {:0.2f}$".format(usage_cost))
-    print("Demand Cost: {:0.2f}$".format(pricing_model.get_demand_cost(max_demand)))
-    print("Final Cost: {:0.2f}$".format(usage_cost + pricing_model.get_demand_cost(max_demand)))
-
-
-
-# interval = 15
-# max_depth = 64
-#
-# action_set = [0, 0.25, 0.5, 0.75, 1]
-# target_charge = 1
-#
-# target_time = max_depth * interval
-#
-#
-#
-# print("Calculating optimal path...", end='')
-# start_time = timeit.default_timer()
-# advise_unit = EVA(
-#     target=Node(target_charge, target_time),
-#     interval=interval,
-#     action_set=action_set,
-#     root=root
-# )
-#
-# advise_unit.shortest_path(from_node=root)
-#
-# elapsed = timeit.default_timer() - start_time
-# print("done ({:0.2f}sec)".format(elapsed))
-# path = advise_unit.reconstruct_path()
-# path_edges = list(zip(path, path[1:]))
-#
-# fig = plotly_figure(advise_unit.g, path=path)
-# py.plot(fig)
-#
-# #print(len(advise_unit.g.nodes()))
-# predictions = prod_prediction[prod_algkey] - cons_prediction[cons_algkey]
-# ground_truth = dataset[current_time:current_time+datetime.timedelta(hours=16)]['WTG Production'] - dataset[current_time:current_time+datetime.timedelta(hours=16)]['House Consumption']
-#
-# data = [
-#     go.Scatter(
-#         x=predictions.index,  # assign x as the dataframe column 'x'
-#         y=predictions
-#     ),
-#     go.Scatter(
-#         x=ground_truth.index,  # assign x as the dataframe column 'x'
-#         y=ground_truth
-#     )
-# ]
-# IPython notebook
-# py.iplot(data, filename='pandas/basic-line-plot')
-
-# py.plot(data)
+    simulator = BillingPeriodSimulator(cfg)
+    simulator.run()
+    simulator.print_description()
+    simulator.print_results()
