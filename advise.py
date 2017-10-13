@@ -502,20 +502,20 @@ class BillingPeriodSimulator:
 
             self.robustness_list.append(robustness)
 
-            max_demand = max(self.max_demand, day_max_demand)
+            self.max_demand = max(self.max_demand, day_max_demand)
 
             # creating a 'fake' mpc for the inbetween hours
 
             try:
                 mpc = DaySimulator(dataset, self._cfg, t[1], self.test_times[index + 1][0], self.pricing_model,
-                                   max_demand=max_demand,
+                                   max_demand=self.max_demand,
                                    starting_charge=1)
                 unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
                 unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
                 # print("========", unplugged_demand, max_demand, "===========")
 
-                max_demand = max(max_demand, unplugged_demand)
+                self.max_demand = max(self.max_demand, unplugged_demand)
                 self.usage_cost += unplugged_usage
             except IndexError:
                 # our period is over :-)
