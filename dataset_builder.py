@@ -1,6 +1,7 @@
-import timeit
-import pandas as pd
 import datetime
+import timeit
+
+import pandas as pd
 
 
 def build_dataset(cfg):
@@ -38,6 +39,7 @@ def build_dataset(cfg):
                                                                                                                    20): datetime.datetime(
                                                                                                      2013, 1, 31)]
 
-    print(dataset.describe())
+    dataset.drop('Occupancy', axis=1, inplace=True)
+    # print(dataset.describe())
 
     return dataset
