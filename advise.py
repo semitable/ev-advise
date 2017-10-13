@@ -1,6 +1,7 @@
 """
 EV advise unit
 """
+import argparse
 import datetime
 import random
 
@@ -16,19 +17,6 @@ import pricing.pricing
 from dataset_builder import build_dataset
 from house.iec import IEC
 from ier.ier import IER
-
-# some constants (column names)
-with open("config/common.yml", 'r') as ymlfile:
-    cfg = yaml.load(ymlfile)
-
-prod_algkey = cfg['algorithms']['production']
-prod_algkey_var = cfg['algorithms']['production_var']
-cons_algkey = cfg['algorithms']['consumption']
-
-real_consumption_key = cfg['truth']['consumption']
-real_production_key = cfg['truth']['production']
-
-del cfg
 
 # a global charger to take advantage of result caching
 Charger = battery.battery.Charger()
@@ -329,8 +317,9 @@ class SimpleEVPlanner(EVPlanner):
 
 
 class DaySimulator:
-    def __init__(self, data, start: datetime.datetime, end: datetime.datetime, pricing_model: pricing.pricing.PricingModel, max_demand=0, starting_charge=0.1,
-                 active_MPC=True, cfg=None):
+    def __init__(self, data, cfg, start: datetime.datetime, end: datetime.datetime,
+                 pricing_model: pricing.pricing.PricingModel, max_demand=0, starting_charge=0.1,
+                 active_MPC=True):
         self.data = data
         self.start = start
         self.end = end
@@ -396,7 +385,7 @@ class DaySimulator:
 
         for d in tqdm(range(max_depth)):
             if self.active_MPC or 'advise_unit' not in locals():
-                if cfg['advise-unit'] != 'ev-advise':
+                if self._cfg['advise-unit'] != 'ev-advise':
                     advise_unit = SimpleEVPlanner(
                         current_time=current_time,
                         end_time=self.end,
@@ -406,8 +395,8 @@ class DaySimulator:
                         action_set=action_set,
                         starting_max_demand=max_demand,
                         pricing_model=self._pricing_model,
-                        is_informed=(cfg['advise-unit'] in ['informed', 'informed-delayed']),
-                        is_delayed=(cfg['advise-unit'] in ['delayed', 'informed-delayed'])
+                        is_informed=(self._cfg['advise-unit'] in ['informed', 'informed-delayed']),
+                        is_delayed=(self._cfg['advise-unit'] in ['delayed', 'informed-delayed'])
                     )
 
                 else:
@@ -501,9 +490,9 @@ class BillingPeriodSimulator:
         for index, t in enumerate(self.test_times):
             print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-            use_mpc = True if cfg['USE_MPC'] == 'yes' else False
+            use_mpc = True if self._cfg['USE_MPC'] == 'yes' else False
 
-            mpc = DaySimulator(dataset, t[0], t[1], self.pricing_model, max_demand=self.max_demand,
+            mpc = DaySimulator(dataset, self._cfg, t[0], t[1], self.pricing_model, max_demand=self.max_demand,
                                starting_charge=t[2],
                                active_MPC=use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
@@ -515,7 +504,7 @@ class BillingPeriodSimulator:
             # creating a 'fake' mpc for the inbetween hours
 
             try:
-                mpc = DaySimulator(dataset, t[1], self.test_times[index + 1][0], self.pricing_model,
+                mpc = DaySimulator(dataset, self._cfg, t[1], self.test_times[index + 1][0], self.pricing_model,
                                    max_demand=max_demand,
                                    starting_charge=1)
                 unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
@@ -576,7 +565,7 @@ class BillingPeriodSimulator:
             start_time = tz.localize(start_time)
             end_time = tz.localize(end_time)
 
-            soc = np.random.uniform(cfg['battery']['soc-range']['min'], cfg['battery']['soc-range']['max'])
+            soc = np.random.uniform(self._cfg['battery']['soc-range']['min'], self._cfg['battery']['soc-range']['max'])
 
             # print("{} to {}".format(start_time, end_time))
             # print(end_time-start_time)
@@ -592,10 +581,51 @@ class BillingPeriodSimulator:
         return time_list
 
 
-if __name__ == '__main__':
+def main():
+    # argument parser
 
-    # first lets build our configuration
-    cfg_filenames = ['config/common.yml', 'config/tests/dec_us.yml', 'config/advisors/smartcharge.yml']
+    parser = argparse.ArgumentParser()
+
+    month = parser.add_mutually_exclusive_group(required=True)
+    month.add_argument('--december', action='store_true')
+    month.add_argument('--january', action='store_true')
+
+    location = parser.add_mutually_exclusive_group(required=True)
+    location.add_argument('--us', action='store_true')
+    location.add_argument('--uk', action='store_true')
+
+    agent = parser.add_mutually_exclusive_group(required=True)
+    agent.add_argument('--smartcharge', action='store_true')
+    agent.add_argument('--smartcharge_nompc', action='store_true')
+    agent.add_argument('--informed', action='store_true')
+    agent.add_argument('--delayed', action='store_true')
+    agent.add_argument('--informed_delayed', action='store_true')
+
+    args = parser.parse_args()
+
+    cfg_filenames = ['config/common.yml']
+
+    if (args.december):
+        if (args.us):
+            cfg_filenames.append('config/tests/dec_us.yml')
+        elif (args.uk):
+            cfg_filenames.append('config/tests/dec_uk.yml')
+    elif (args.january):
+        if (args.us):
+            cfg_filenames.append('config/tests/jan_us.yml')
+        elif (args.uk):
+            cfg_filenames.append('config/tests/jan_uk.yml')
+
+    if (args.smartcharge):
+        cfg_filenames.append('config/advisors/smartcharge.yml')
+    elif (args.smartcharge_nompc):
+        cfg_filenames.append('config/advisors/smartcharge_nompc.yml')
+    elif (args.informed):
+        cfg_filenames.append('config/advisors/informed.yml')
+    elif (args.delayed):
+        cfg_filenames.append('config/advisors/informed.yml')
+    elif (args.informed_delayed):
+        cfg_filenames.append('config/advisors/informed.yml')
 
     cfg = {}
 
@@ -607,15 +637,31 @@ if __name__ == '__main__':
     np.random.seed(cfg['random-seed'])
     random.seed(cfg['random-seed'])
 
-    # generate arrive/leave times for relevant month
-    dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
-
-    #print(pd.DataFrame(test_times, columns=['Start Time', 'End Time', 'SoC']))
-
-    # build our dataset
-    dataset = build_dataset(cfg)
+    # simulate a billing period
 
     simulator = BillingPeriodSimulator(cfg)
     simulator.run()
+    # and print results
     simulator.print_description()
     simulator.print_results()
+
+
+
+if __name__ == '__main__':
+    # some constants (column names)
+    with open("config/common.yml", 'r') as ymlfile:
+        cfg = yaml.load(ymlfile)
+
+    prod_algkey = cfg['algorithms']['production']
+    prod_algkey_var = cfg['algorithms']['production_var']
+    cons_algkey = cfg['algorithms']['consumption']
+
+    real_consumption_key = cfg['truth']['consumption']
+    real_production_key = cfg['truth']['production']
+
+    dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
+    # build our dataset
+    dataset = build_dataset(cfg)
+    del cfg
+
+    main()
