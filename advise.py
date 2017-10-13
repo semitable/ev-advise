@@ -407,6 +407,7 @@ class DaySimulator:
 
         robustness = []
 
+
         for d in tqdm(range(max_depth)):
             if self.active_MPC or 'advise_unit' not in locals():
                 if cfg['advise-unit'] != 'ev-advise':
@@ -488,6 +489,7 @@ class DaySimulator:
 
 
 def generate_arrive_leave_times(start_date, end_date, tz):
+
     current_date = start_date
     time_list = []
 
@@ -545,6 +547,7 @@ if __name__ == '__main__':
             cfg.update(yaml.load(ymlfile))
 
     # dont forget to seed our RNG!
+    np.random.seed(cfg['random-seed'])
     random.seed(cfg['random-seed'])
 
     # generate arrive/leave times for relevant month
@@ -556,6 +559,8 @@ if __name__ == '__main__':
         test_times = generate_arrive_leave_times(datetime.date(2012, 12, 1), datetime.date(2012, 12, 31), dataset_tz)
     else:
         raise ValueError
+
+    #print(pd.DataFrame(test_times, columns=['Start Time', 'End Time', 'SoC']))
 
     # build our dataset
     dataset = build_dataset(cfg)
