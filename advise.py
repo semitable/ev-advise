@@ -12,10 +12,10 @@ import pytz
 import yaml
 from tqdm import tqdm
 
-import pricing.pricing
-from battery.battery import Charger as ChargerClass
+import pricing
+from battery import Charger as ChargerClass
 from dataset_builder import build_dataset
-from house.iec import IEC
+from house import IEC
 from ier.ier import IER
 
 # a global charger to take advantage of result caching
@@ -63,7 +63,7 @@ class Node:
 class EVPlanner:
     def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
                  target_battery,
-                 interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.pricing.PricingModel):
+                 interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.PricingModel):
         self._data = data
 
         self.current_time = current_time
@@ -94,7 +94,7 @@ class EVPlanner:
 class EVA(EVPlanner):
     def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
                  target_battery,
-                 interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.pricing.PricingModel):
+                 interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.PricingModel):
 
         super(EVA, self).__init__(data, current_time, end_time, current_battery, target_battery, interval, action_set,
                                   starting_max_demand, pricing_model)
@@ -266,7 +266,7 @@ class EVA(EVPlanner):
 
 class SimpleEVPlanner(EVPlanner):
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
-                 starting_max_demand, pricing_model: pricing.pricing.PricingModel, is_informed=False, is_delayed=False,
+                 starting_max_demand, pricing_model: pricing.PricingModel, is_informed=False, is_delayed=False,
                  delayed_start=None):
 
         super(SimpleEVPlanner, self).__init__(data, current_time, end_time, current_battery, target_battery, interval,
@@ -320,7 +320,7 @@ class SimpleEVPlanner(EVPlanner):
 
 class DaySimulator:
     def __init__(self, data, cfg, start: datetime.datetime, end: datetime.datetime,
-                 pricing_model: pricing.pricing.PricingModel, max_demand=0, starting_charge=0.1,
+                 pricing_model: pricing.PricingModel, max_demand=0, starting_charge=0.1,
                  active_MPC=True):
         self.data = data
         self.start = start
@@ -479,9 +479,9 @@ class BillingPeriodSimulator:
         self._cfg = cfg
 
         if (cfg['location'] == 'UK'):
-            self.pricing_model = pricing.pricing.EuropePricingModel(self._data.index)
+            self.pricing_model = pricing.EuropePricingModel(self._data.index)
         else:
-            self.pricing_model = pricing.pricing.USPricingModel(self._data.index)
+            self.pricing_model = pricing.USPricingModel(self._data.index)
 
         if cfg['dates']['month'] == 'january':
             self.test_times = self.generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31),
