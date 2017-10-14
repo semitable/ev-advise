@@ -527,6 +527,7 @@ class BillingPeriodSimulator:
         print('Location: {}'.format(self._cfg['location']))
         print('Month: {}'.format(self._cfg['dates']['month']))
         print('Agent: {}'.format(self._cfg['advise-unit']))
+        print('Using MPC: {}'.format(self._cfg['USE_MPC']))
         if (self._cfg['advise-unit'] in ['delayed', 'informed-delayed']):
             print('Delayed Start: {}:{}'.format(self._cfg['delay']['hour'], self._cfg['delay']['minute']))
 
