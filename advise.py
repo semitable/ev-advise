@@ -61,8 +61,11 @@ class Node:
 
 
 class EVPlanner:
-    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery,
+    def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
+                 target_battery,
                  interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.pricing.PricingModel):
+        self._data = data
+
         self.current_time = current_time
         self.end_time = end_time
 
@@ -89,10 +92,11 @@ class EVPlanner:
 
 
 class EVA(EVPlanner):
-    def __init__(self, current_time: datetime.datetime, end_time: datetime.datetime, current_battery, target_battery,
+    def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
+                 target_battery,
                  interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.pricing.PricingModel):
 
-        super(EVA, self).__init__(current_time, end_time, current_battery, target_battery, interval, action_set,
+        super(EVA, self).__init__(data, current_time, end_time, current_battery, target_battery, interval, action_set,
                                   starting_max_demand, pricing_model)
 
         self.interval_in_minutes = self.interval.total_seconds() // 60
@@ -110,8 +114,8 @@ class EVA(EVPlanner):
         self.g.add_node(self.root, usage_cost=np.inf, best_action=None, max_demand=np.inf)
         self.g.add_node(self.target, usage_cost=0, best_action=None, max_demand=starting_max_demand)
 
-        self.prod_prediction = IER(dataset, current_time).predict([prod_algkey])  # todo check renes predictions plz
-        self.cons_prediction = IEC(dataset[:current_time]).predict([cons_algkey])
+        self.prod_prediction = IER(self._data, current_time).predict([prod_algkey])  # todo check renes predictions plz
+        self.cons_prediction = IEC(self._data[:current_time]).predict([cons_algkey])
         self.prod_prediction.index.tz_convert(dataset_tz)
 
     def get_real_time(self, node_time):
@@ -261,11 +265,11 @@ class EVA(EVPlanner):
 
 
 class SimpleEVPlanner(EVPlanner):
-    def __init__(self, current_time, end_time, current_battery, target_battery, interval, action_set,
+    def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.pricing.PricingModel, is_informed=False, is_delayed=False,
                  delayed_start=None):
 
-        super(SimpleEVPlanner, self).__init__(current_time, end_time, current_battery, target_battery, interval,
+        super(SimpleEVPlanner, self).__init__(data, current_time, end_time, current_battery, target_battery, interval,
                                               action_set, starting_max_demand, pricing_model)
 
         self._is_informed = is_informed
@@ -385,6 +389,7 @@ class DaySimulator:
             if self.active_MPC or 'advise_unit' not in locals():
                 if self._cfg['advise-unit'] != 'ev-advise':
                     advise_unit = SimpleEVPlanner(
+                        data=self.data,
                         current_time=current_time,
                         end_time=self.end,
                         current_battery=current_charge,
@@ -404,6 +409,7 @@ class DaySimulator:
 
                 else:
                     advise_unit = EVA(
+                        data=self.data,
                         current_time=current_time,
                         end_time=self.end,
                         current_battery=current_charge,
@@ -467,13 +473,15 @@ class DaySimulator:
 
 
 class BillingPeriodSimulator:
-    def __init__(self, cfg):
+    def __init__(self, data, cfg):
+
+        self._data = data
         self._cfg = cfg
 
         if (cfg['location'] == 'UK'):
-            self.pricing_model = pricing.pricing.EuropePricingModel(dataset.index)
+            self.pricing_model = pricing.pricing.EuropePricingModel(self._data.index)
         else:
-            self.pricing_model = pricing.pricing.USPricingModel(dataset.index)
+            self.pricing_model = pricing.pricing.USPricingModel(self._data.index)
 
         if cfg['dates']['month'] == 'january':
             self.test_times = self.generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31),
@@ -495,7 +503,7 @@ class BillingPeriodSimulator:
 
             use_mpc = True if self._cfg['USE_MPC'] == 'yes' else False
 
-            mpc = DaySimulator(dataset, self._cfg, t[0], t[1], self.pricing_model, max_demand=self.max_demand,
+            mpc = DaySimulator(self._data, self._cfg, t[0], t[1], self.pricing_model, max_demand=self.max_demand,
                                starting_charge=t[2],
                                active_MPC=use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
@@ -507,7 +515,7 @@ class BillingPeriodSimulator:
             # creating a 'fake' mpc for the inbetween hours
 
             try:
-                mpc = DaySimulator(dataset, self._cfg, t[1], self.test_times[index + 1][0], self.pricing_model,
+                mpc = DaySimulator(self._data, self._cfg, t[1], self.test_times[index + 1][0], self.pricing_model,
                                    max_demand=self.max_demand,
                                    starting_charge=1)
                 unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
@@ -641,9 +649,12 @@ def main():
     np.random.seed(cfg['random-seed'])
     random.seed(cfg['random-seed'])
 
+    # build our dataset
+    dataset = build_dataset(cfg)
+
     # simulate a billing period
 
-    simulator = BillingPeriodSimulator(cfg)
+    simulator = BillingPeriodSimulator(dataset, cfg)
     simulator.run()
     # and print results
     simulator.print_description()
@@ -664,8 +675,6 @@ if __name__ == '__main__':
     real_production_key = cfg['truth']['production']
 
     dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
-    # build our dataset
-    dataset = build_dataset(cfg)
     del cfg
 
     main()
