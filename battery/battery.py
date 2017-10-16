@@ -1,14 +1,12 @@
 """ A simple battery model
 """
 
-from math import exp, sqrt, pow
-import numpy as np
-from scipy.interpolate import interp1d
-import plotly.offline as py
-import plotly.graph_objs as go
-import itertools
-import yaml
 import datetime
+from math import exp, sqrt, pow
+
+import numpy as np
+import yaml
+from scipy.interpolate import interp1d
 
 with open("config/common.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
@@ -210,7 +208,7 @@ class Charger:
         self.total +=1
         # check if value in cache
         cache_key = ChargerCache.ChargerCacheKey(self.battery.it, action, interval)
-        if(cache_key in self.cache):
+        if cache_key in self.cache:
             self.hit += 1
             return self.cache.cache[cache_key]['value']
 

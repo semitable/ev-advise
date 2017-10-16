@@ -173,7 +173,7 @@ class EVA(EVPlanner):
                 self.g.add_node(from_node, usage_cost=np.inf, best_action=None, max_demand=np.inf)
             return
 
-        if (from_node.battery >= self.target.battery):
+        if from_node.battery >= self.target.battery:
             action_set = [0]
         else:
             action_set = self.action_set
@@ -280,7 +280,7 @@ class SimpleEVPlanner(EVPlanner):
         else:
             cur_date = current_time.date() - datetime.timedelta(days=1)  # else we are probably after midnight
 
-        if (is_delayed):
+        if is_delayed:
             self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_start))
 
     def calc_informed_charge(self):
@@ -478,7 +478,7 @@ class BillingPeriodSimulator:
         self._data = data
         self._cfg = cfg
 
-        if (cfg['location'] == 'UK'):
+        if cfg['location'] == 'UK':
             self.pricing_model = pricing.EuropePricingModel(self._data.index)
         else:
             self.pricing_model = pricing.USPricingModel(self._data.index)
@@ -536,7 +536,7 @@ class BillingPeriodSimulator:
         print('Month: {}'.format(self._cfg['dates']['month']))
         print('Agent: {}'.format(self._cfg['advise-unit']))
         print('Using MPC: {}'.format(self._cfg['USE_MPC']))
-        if (self._cfg['advise-unit'] in ['delayed', 'informed-delayed']):
+        if self._cfg['advise-unit'] in ['delayed', 'informed-delayed']:
             print('Delayed Start: {}:{}'.format(self._cfg['delay']['hour'], self._cfg['delay']['minute']))
 
     def print_results(self):
@@ -551,7 +551,7 @@ class BillingPeriodSimulator:
         current_date = start_date
         time_list = []
 
-        while (current_date < end_date):
+        while current_date < end_date:
 
             current_datetime = datetime.datetime.combine(current_date, datetime.time())
 
@@ -617,26 +617,26 @@ def main():
 
     cfg_filenames = ['config/common.yml']
 
-    if (args.december):
-        if (args.us):
+    if args.december:
+        if args.us:
             cfg_filenames.append('config/tests/dec_us.yml')
-        elif (args.uk):
+        elif args.uk:
             cfg_filenames.append('config/tests/dec_uk.yml')
-    elif (args.january):
-        if (args.us):
+    elif args.january:
+        if args.us:
             cfg_filenames.append('config/tests/jan_us.yml')
-        elif (args.uk):
+        elif args.uk:
             cfg_filenames.append('config/tests/jan_uk.yml')
 
-    if (args.smartcharge):
+    if args.smartcharge:
         cfg_filenames.append('config/advisors/smartcharge.yml')
-    elif (args.smartcharge_nompc):
+    elif args.smartcharge_nompc:
         cfg_filenames.append('config/advisors/smartcharge_nompc.yml')
-    elif (args.informed):
+    elif args.informed:
         cfg_filenames.append('config/advisors/informed.yml')
-    elif (args.delayed):
+    elif args.delayed:
         cfg_filenames.append('config/advisors/delayed.yml')
-    elif (args.informed_delayed):
+    elif args.informed_delayed:
         cfg_filenames.append('config/advisors/informed_delayed.yml')
 
     cfg = {}
