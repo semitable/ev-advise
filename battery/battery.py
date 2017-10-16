@@ -37,8 +37,6 @@ else:
     raise ValueError
 
 
-
-
 class Battery:
     def __init__(self, Q, it):
         self.V_batt = None
@@ -118,8 +116,8 @@ class NissanLeaf(Battery):
         self.A = 30.2313
         self.B = 0.91685
 
-class ChargerCache:
 
+class ChargerCache:
     class ChargerCacheKey:
         def __init__(self, cur_charge, action, interval):
             self.cur_charge = cur_charge
@@ -185,7 +183,6 @@ class Charger:
         self.action_set = battery_action_set
         self.efficiency = battery_efficiency
 
-
         self.battery = NissanLeaf()
         self.battery.set_open_circuit()
         self.battery.calc_charging_voltage()
@@ -205,13 +202,12 @@ class Charger:
         if action == 0 or interval == 0:
             return self.battery.get_soc(), 0
 
-        self.total +=1
+        self.total += 1
         # check if value in cache
         cache_key = ChargerCache.ChargerCacheKey(self.battery.it, action, interval)
         if cache_key in self.cache:
             self.hit += 1
             return self.cache.cache[cache_key]['value']
-
 
         current_efficiency = self.efficiency[self.action_set.index(action)]
 

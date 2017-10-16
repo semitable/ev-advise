@@ -89,7 +89,7 @@ def find_similar_days(training_data, observation_length, k, interval, method=cos
             last_day_vector.as_matrix(columns=[cons_col]),
             training_data[i - obs_td:i].resample(timedelta(minutes=interval)).sum().as_matrix(columns=[cons_col])
         ) for i in similar_moments.index
-        ]
+    ]
 
     indexes = (similar_moments
                .sort_values('Similarity', ascending=False)
@@ -174,8 +174,9 @@ def calc_baseline(training_data, similar_moments,
 
     return baseline
 
+
 def calc_baseline_dumb(training_data, similar_moments,
-                  prediction_window):
+                       prediction_window):
     if type(prediction_window) is not timedelta:
         prediction_window = timedelta(minutes=prediction_window)
 
@@ -183,18 +184,17 @@ def calc_baseline_dumb(training_data, similar_moments,
 
     r = np.zeros((49, 1))
     for i in similar_moments:
-        similar_day = (1/k) * training_data[i:i + prediction_window].resample(timedelta(minutes=15)).mean()
+        similar_day = (1 / k) * training_data[i:i + prediction_window].resample(timedelta(minutes=15)).mean()
         similar_day = similar_day[0:49]
         r += similar_day
-        #r += (1 / k) * training_data[i:i + prediction_window].as_matrix
-
+        # r += (1 / k) * training_data[i:i + prediction_window].as_matrix
 
     baseline = np.squeeze(r)
 
-    b = pd.DataFrame(baseline).set_index(pd.TimedeltaIndex(freq='15T', start=0, periods=49)).resample(timedelta(minutes=1)).ffill()
+    b = pd.DataFrame(baseline).set_index(pd.TimedeltaIndex(freq='15T', start=0, periods=49)).resample(
+        timedelta(minutes=1)).ffill()
     baseline = np.squeeze(b.as_matrix())
     baseline = np.concatenate((baseline, np.atleast_1d(baseline[-1])))
-
 
     return baseline
 
@@ -266,10 +266,11 @@ class IEC(object):
             "Simple Mean": self.simple_mean,
             "Usage Zone Finder": self.usage_zone_finder,
             "ARIMA": self.ARIMAforecast,
-            "Baseline Finder":  partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
-                          short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=250,
-                          observation_length_addition=240, short_term_ease_method=easeOutSine,
-                          long_term_ease_method=easeOutCirc),
+            "Baseline Finder": partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
+                                       short_interp_range=25, half_window=70, similarity_interval=5,
+                                       recent_baseline_length=250,
+                                       observation_length_addition=240, short_term_ease_method=easeOutSine,
+                                       long_term_ease_method=easeOutCirc),
             "STLF": self.baseline_finder_dumb,
             "b1": partial(self.baseline_finder, training_window=1440 * 60, k=9, long_interp_range=250,
                           short_interp_range=25, half_window=70, similarity_interval=5, recent_baseline_length=250,
@@ -366,7 +367,7 @@ class IEC(object):
         training_data = self.data.tail(training_window)[[cons_col]]
 
         # observation_length is ALL of the current day (till now) + 4 hours
-        observation_length = mins_in_day(self.now) + 4*60
+        observation_length = mins_in_day(self.now) + 4 * 60
 
         mse = partial(baseline_similarity, filter=False)
 
@@ -383,7 +384,6 @@ class IEC(object):
         # First index is the current time
 
         current_consumption = training_data.tail(1)[cons_col]
-
 
         baseline[0] = current_consumption
 

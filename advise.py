@@ -141,7 +141,6 @@ class EVA(EVPlanner):
 
         return self._pricing_model.get_usage_cost(usage)
 
-
     def calc_max_demand(self, time, interval, ev_charge):
 
         interval_in_minutes = interval.total_seconds() // 60
@@ -227,7 +226,7 @@ class EVA(EVPlanner):
 
             this_path_usage_cost = self.g.node[new_node]['usage_cost'] + interval_usage_cost
             this_path_demand = max(self.g.node[new_node]['max_demand'], interval_demand)
-            this_path_demand_cost =  self._pricing_model.get_demand_cost(demand_balancer * this_path_demand)
+            this_path_demand_cost = self._pricing_model.get_demand_cost(demand_balancer * this_path_demand)
 
             this_path_cost = this_path_usage_cost + this_path_demand_cost
 
@@ -236,7 +235,7 @@ class EVA(EVPlanner):
                             action=action
                             )
 
-            if this_path_cost < self.g.node[from_node]['usage_cost'] +  self._pricing_model.get_demand_cost(
+            if this_path_cost < self.g.node[from_node]['usage_cost'] + self._pricing_model.get_demand_cost(
                             demand_balancer * self.g.node[from_node]['max_demand']):
                 # replace the costs of the current node
                 self.g.add_node(from_node,
@@ -333,7 +332,6 @@ class DaySimulator:
 
         self._pricing_model = pricing_model
 
-
     def calc_real_usage(self, time, interval, ev_charge):
 
         interval_in_minutes = interval.total_seconds() / 60
@@ -346,7 +344,6 @@ class DaySimulator:
         usage = m1 + ev_charge / interval_in_minutes - m2
 
         return self._pricing_model.get_usage_cost(usage)
-
 
     def calc_real_demand(self, time, interval: datetime.timedelta, ev_charge):
         interval_in_minutes = interval.total_seconds() / 60
@@ -383,7 +380,6 @@ class DaySimulator:
         current_day['EV'] = 0
 
         robustness = []
-
 
         for d in tqdm(range(max_depth)):
             if self.active_MPC or 'advise_unit' not in locals():
@@ -659,7 +655,6 @@ def main():
     # and print results
     simulator.print_description()
     simulator.print_results()
-
 
 
 if __name__ == '__main__':

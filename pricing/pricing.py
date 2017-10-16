@@ -1,10 +1,12 @@
-'''
+"""
 Pricing Model 
 Filippos Christianos
-'''
-import yaml
-import pandas as pd
+"""
 import datetime
+
+import pandas as pd
+import yaml
+
 # we have implemented two pricing models: US and UK
 
 PRICING_MODELS = ('UK_PRICING', 'US_PRICING')
@@ -17,26 +19,21 @@ sell_price_key = cfg['prices']['sell_price_key']
 del cfg
 
 
-
 class PricingModel:
-
     def setup_prices(self):
         raise NotImplemented()
 
     def __init__(self, time_index: pd.DatetimeIndex):
-
         self._billing_period = None
 
         self._prices = pd.DataFrame(index=time_index, columns=[usage_cost_key, sell_price_key])
 
         self.setup_prices()
 
-
     def start_billing_period(self):
         self._billing_period = {
             'max_demand': 0
         }
-
 
     def get_usage_cost(self, usage):
         raise NotImplemented()
@@ -51,9 +48,7 @@ class PricingModel:
         return self._min_price * charge
 
 
-
 class EuropePricingModel(PricingModel):
-
     def has_demand_prices(self):
         return False
 
@@ -61,8 +56,8 @@ class EuropePricingModel(PricingModel):
         return 0
 
     def get_usage_cost(self, usage):
-        pbuy = self._prices[usage.index[0] : usage.index[-1]][usage_cost_key]
-        psell = self._prices[usage.index[0] : usage.index[-1]][sell_price_key]
+        pbuy = self._prices[usage.index[0]: usage.index[-1]][usage_cost_key]
+        psell = self._prices[usage.index[0]: usage.index[-1]][sell_price_key]
         price = pbuy.copy()
         price[usage < 0] = psell
         final = (usage * price).sum()
@@ -89,19 +84,16 @@ class EuropePricingModel(PricingModel):
 
 
 class USPricingModel(PricingModel):
-
     def has_demand_prices(self):
         return True
 
     def get_demand_cost(self, demand):
         return demand * 8.03
 
-
     def get_usage_cost(self, usage):
         pbuy = self._prices[usage.index[0]: usage.index[-1]][usage_cost_key]
         final = (usage * pbuy).sum()  # pbuy == psell
         return final
-
 
     def setup_prices(self):
         # summer only: https://www.pge.com/en_US/business/rate-plans/rate-plans/peak-day-pricing/peak-day-pricing.page
