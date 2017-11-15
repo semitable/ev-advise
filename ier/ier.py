@@ -1,3 +1,4 @@
+import datetime
 from functools import partial
 
 import GPy
@@ -12,6 +13,11 @@ import pandas as pd
 # COL_WATTAGE = 2
 col_production = 'WTG Production'
 col_prediction = 'WTG Prediction'
+
+# load predictions
+print("reading wind predictions...")
+wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
+wind_data.index = wind_data.index.set_levels([wind_data.index.levels[0], pd.to_timedelta(wind_data.index.levels[1])])
 
 '''
 @returns predictions from renes
@@ -29,7 +35,7 @@ class IER(object):
 
         Args:
             :param data: Historical dataset
-            :param historical_offset: offset which will be the current time (will be used as negative)
+            :param current_time: current_time (will discard any truth values after now)
         """
         self.data = data
         self.now = current_time
@@ -63,9 +69,12 @@ class IER(object):
         assert historical_offset > prediction_window, "Not enough predictions available from renes"
 
         predictions = np.zeros(prediction_window)
-        predictions[:] = self.data[-historical_offset:-historical_offset + prediction_window][col_prediction].values
+        predictions[:] = np.squeeze((wind_data.loc[self.now.replace(minute=0)].resample('1T').interpolate() / 60)[
+                                    datetime.timedelta(minutes=self.now.minute):datetime.timedelta(
+                                        minutes=prediction_window + self.now.minute - 1)].values)
+        # predictions[:] = self.data[-historical_offset:-historical_offset + prediction_window][col_prediction].values
         predictions[0] = self.data.iloc[-historical_offset][col_production]  # 0 is the ground truth...
-        return np.squeeze(predictions)
+        return predictions
 
     def renes_hybrid(self, training_cycle=2, prediction_window=16 * 60, historical_offset=0, stochastic_interval=2):
 
@@ -121,6 +130,7 @@ class IER(object):
         y_mean *= std
         y_var *= std ** 2
 
+        # todo check bound to physical limits
         # Populate array (1st element is the ground truth) and bound to physical limits
         nominal_power_wtg = 3000 * 60  # 3 Kw --> 3*60 joule (in a minute) #np.inf
         predictions[1:, 0] = np.clip(predictions[1:, 0] + y_mean[1:, 0], 0, nominal_power_wtg)

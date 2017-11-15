@@ -14,7 +14,6 @@ from tqdm import tqdm
 
 import pricing
 from battery import Charger as ChargerClass
-from dataset_builder import build_dataset
 from house import IEC
 from ier.ier import IER
 
@@ -265,8 +264,8 @@ class EVA(EVPlanner):
 
 class SimpleEVPlanner(EVPlanner):
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
-                 starting_max_demand, pricing_model: pricing.PricingModel, is_informed=False, is_delayed=False,
-                 delayed_start=None):
+                 starting_max_demand, pricing_model: pricing.PricingModel, is_informed, is_delayed,
+                 delayed_start):
 
         super(SimpleEVPlanner, self).__init__(data, current_time, end_time, current_battery, target_battery, interval,
                                               action_set, starting_max_demand, pricing_model)
@@ -317,18 +316,42 @@ class SimpleEVPlanner(EVPlanner):
         return result
 
 
+class SimpleEVPlannerDelayed(SimpleEVPlanner):
+    def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
+                 starting_max_demand, pricing_model: pricing.PricingModel):
+        super().__init__(data, current_time, end_time, current_battery, target_battery,
+                         interval, action_set, starting_max_demand, pricing_model,
+                         is_informed=False, is_delayed=True, delayed_start=None)
+
+
+class SimpleEVPlannerInformed(SimpleEVPlanner):
+    def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
+                 starting_max_demand, pricing_model: pricing.PricingModel):
+        super().__init__(data, current_time, end_time, current_battery, target_battery,
+                         interval, action_set, starting_max_demand, pricing_model,
+                         is_informed=True, is_delayed=False, delayed_start=None)
+
+
+class SimpleEVPlannerDelayedInformed(SimpleEVPlanner):
+    def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
+                 starting_max_demand, pricing_model: pricing.PricingModel):
+        super().__init__(data, current_time, end_time, current_battery,
+                         target_battery, interval,
+                         action_set, starting_max_demand, pricing_model,
+                         is_informed=True, is_delayed=True, delayed_start=None)
+
+
 class DaySimulator:
-    def __init__(self, data, cfg, start: datetime.datetime, end: datetime.datetime,
+    def __init__(self, data, agent_class, start: datetime.datetime, end: datetime.datetime,
                  pricing_model: pricing.PricingModel, max_demand=0, starting_charge=0.1,
                  active_MPC=True):
         self.data = data
+        self._agent_class = agent_class
         self.start = start
         self.end = end
         self.max_starting_demand = max_demand
         self.starting_charge = starting_charge
         self.active_MPC = active_MPC
-
-        self._cfg = cfg
 
         self._pricing_model = pricing_model
 
@@ -383,38 +406,35 @@ class DaySimulator:
 
         for d in tqdm(range(max_depth)):
             if self.active_MPC or 'advise_unit' not in locals():
-                if self._cfg['advise-unit'] != 'ev-advise':
-                    advise_unit = SimpleEVPlanner(
-                        data=self.data,
-                        current_time=current_time,
-                        end_time=self.end,
-                        current_battery=current_charge,
-                        target_battery=target_charge,
-                        interval=interval,
-                        action_set=action_set,
-                        starting_max_demand=max_demand,
-                        pricing_model=self._pricing_model,
-                        is_informed=(self._cfg['advise-unit'] in ['informed', 'informed-delayed']),
-                        is_delayed=(self._cfg['advise-unit'] in ['delayed', 'informed-delayed']),
-                        delayed_start=datetime.time(hour=self._cfg['delay']['hour'],
-                                                    minute=self._cfg['delay']['minute']) if self._cfg[
-                                                                                                'advise-unit'] in [
-                                                                                                'delayed',
-                                                                                                'informed-delayed'] else None
-                    )
-
-                else:
-                    advise_unit = EVA(
-                        data=self.data,
-                        current_time=current_time,
-                        end_time=self.end,
-                        current_battery=current_charge,
-                        target_battery=target_charge,
-                        interval=interval,
-                        action_set=action_set,
-                        starting_max_demand=max_demand,
-                        pricing_model=self._pricing_model
-                    )
+                advise_unit = self._agent_class(
+                    data=self.data,
+                    current_time=current_time,
+                    end_time=self.end,
+                    current_battery=current_charge,
+                    target_battery=target_charge,
+                    interval=interval,
+                    action_set=action_set,
+                    starting_max_demand=max_demand,
+                    pricing_model=self._pricing_model
+                )
+                # advise_unit = SimpleEVPlanner(
+                #     data=self.data,
+                #     current_time=current_time,
+                #     end_time=self.end,
+                #     current_battery=current_charge,
+                #     target_battery=target_charge,
+                #     interval=interval,
+                #     action_set=action_set,
+                #     starting_max_demand=max_demand,
+                #     pricing_model=self._pricing_model,
+                #     is_informed=(self._cfg['advise-unit'] in ['informed', 'informed-delayed']),
+                #     is_delayed=(self._cfg['advise-unit'] in ['delayed', 'informed-delayed']),
+                #     delayed_start=datetime.time(hour=self._cfg['delay']['hour'],
+                #                                 minute=self._cfg['delay']['minute']) if self._cfg[
+                #                                                                             'advise-unit'] in [
+                #                                                                             'delayed',
+                #                                                                             'informed-delayed'] else None
+                # )
 
             if self.active_MPC:
                 result = advise_unit.advise()
@@ -469,24 +489,18 @@ class DaySimulator:
 
 
 class BillingPeriodSimulator:
-    def __init__(self, data, cfg):
+    def __init__(self, data, agent_class, pricing_model: pricing.PricingModel, month: datetime.date):
 
         self._data = data
-        self._cfg = cfg
 
-        if cfg['location'] == 'UK':
-            self.pricing_model = pricing.EuropePricingModel(self._data.index)
-        else:
-            self.pricing_model = pricing.USPricingModel(self._data.index)
+        self._agent_class = agent_class
 
-        if cfg['dates']['month'] == 'january':
-            self.test_times = self.generate_arrive_leave_times(datetime.date(2013, 1, 1), datetime.date(2013, 1, 31),
-                                                               dataset_tz)
-        elif cfg['dates']['month'] == 'december':
-            self.test_times = self.generate_arrive_leave_times(datetime.date(2012, 12, 1), datetime.date(2012, 12, 31),
-                                                               dataset_tz)
-        else:
-            raise ValueError
+        self.pricing_model = pricing_model
+
+        date_start = month.replace(day=1)  # first day of the month
+        date_end = datetime.date(month.year, month.month + 1, 1) - datetime.timedelta(days=1)  # last day of the month
+
+        self.test_times = self.generate_arrive_leave_times(date_start, date_end, dataset_tz)
 
         self.usage_cost = 0
         self.max_demand = 0
@@ -497,9 +511,11 @@ class BillingPeriodSimulator:
         for index, t in enumerate(self.test_times):
             print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-            use_mpc = True if self._cfg['USE_MPC'] == 'yes' else False
+            print("Always using MPC")
+            use_mpc = True
 
-            mpc = DaySimulator(self._data, self._cfg, t[0], t[1], self.pricing_model, max_demand=self.max_demand,
+            mpc = DaySimulator(self._data, self._agent_class, t[0], t[1], self.pricing_model,
+                               max_demand=self.max_demand,
                                starting_charge=t[2],
                                active_MPC=use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
@@ -511,7 +527,8 @@ class BillingPeriodSimulator:
             # creating a 'fake' mpc for the inbetween hours
 
             try:
-                mpc = DaySimulator(self._data, self._cfg, t[1], self.test_times[index + 1][0], self.pricing_model,
+                mpc = DaySimulator(self._data, self._agent_class, t[1], self.test_times[index + 1][0],
+                                   self.pricing_model,
                                    max_demand=self.max_demand,
                                    starting_charge=1)
                 unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
@@ -573,7 +590,7 @@ class BillingPeriodSimulator:
             start_time = tz.localize(start_time)
             end_time = tz.localize(end_time)
 
-            soc = np.random.uniform(self._cfg['battery']['soc-range']['min'], self._cfg['battery']['soc-range']['max'])
+            soc = np.random.uniform(0.2, 0.8)
 
             # print("{} to {}".format(start_time, end_time))
             # print(end_time-start_time)
@@ -594,17 +611,12 @@ def main():
 
     parser = argparse.ArgumentParser()
 
-    month = parser.add_mutually_exclusive_group(required=True)
-    month.add_argument('--december', action='store_true')
-    month.add_argument('--january', action='store_true')
-
     location = parser.add_mutually_exclusive_group(required=True)
     location.add_argument('--us', action='store_true')
     location.add_argument('--uk', action='store_true')
 
     agent = parser.add_mutually_exclusive_group(required=True)
     agent.add_argument('--smartcharge', action='store_true')
-    agent.add_argument('--smartcharge_nompc', action='store_true')
     agent.add_argument('--informed', action='store_true')
     agent.add_argument('--delayed', action='store_true')
     agent.add_argument('--informed_delayed', action='store_true')
@@ -612,28 +624,6 @@ def main():
     args = parser.parse_args()
 
     cfg_filenames = ['config/common.yml']
-
-    if args.december:
-        if args.us:
-            cfg_filenames.append('config/tests/dec_us.yml')
-        elif args.uk:
-            cfg_filenames.append('config/tests/dec_uk.yml')
-    elif args.january:
-        if args.us:
-            cfg_filenames.append('config/tests/jan_us.yml')
-        elif args.uk:
-            cfg_filenames.append('config/tests/jan_uk.yml')
-
-    if args.smartcharge:
-        cfg_filenames.append('config/advisors/smartcharge.yml')
-    elif args.smartcharge_nompc:
-        cfg_filenames.append('config/advisors/smartcharge_nompc.yml')
-    elif args.informed:
-        cfg_filenames.append('config/advisors/informed.yml')
-    elif args.delayed:
-        cfg_filenames.append('config/advisors/delayed.yml')
-    elif args.informed_delayed:
-        cfg_filenames.append('config/advisors/informed_delayed.yml')
 
     cfg = {}
 
@@ -645,15 +635,52 @@ def main():
     np.random.seed(cfg['random-seed'])
     random.seed(cfg['random-seed'])
 
-    # build our dataset
-    dataset = build_dataset(cfg)
+    # wind dataset is a multli index since it also has predictions from meteo stations
+    wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
+    wind_data.index = wind_data.index.set_levels(
+        [wind_data.index.levels[0], pd.to_timedelta(wind_data.index.levels[1])])
 
     # simulate a billing period
 
-    simulator = BillingPeriodSimulator(dataset, cfg)
+    dataset = pd.read_csv('house_data.csv.gz', parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
+
+    # in the dataset find valid months
+    months_house = [x.date() for x in dataset.groupby(pd.TimeGrouper(freq='M')).count().index.tolist()]
+    months_wind = [x.date() for x in wind_data.xs(datetime.timedelta(0), level=1).groupby(
+        pd.TimeGrouper(freq='M')).count().index.tolist()]
+
+    valid_months = set(months_house) & set(months_wind)
+    if (set(months_house) != set(months_wind)):
+        print("Warning: valid months in the two datasets were not 100% matching. Using months common to both.")
+
+    print('Found the following {} valid months in the datasets: '.format(len(valid_months)))
+    print(', '.join(map(str, [x.strftime("%B %Y") for x in valid_months])))
+
+    if args.uk:
+        print("Using UK Pricing.")
+        pricing_model = pricing.EuropePricingModel(dataset.index)
+    else:
+        print("Using US Pricing.")
+        pricing_model = pricing.USPricingModel(dataset.index)
+
+    # choosing a valid month! (first one atm)
+    month = sorted(list(valid_months))[6]
+    print("Running for month: {}".format(month.strftime("%B %Y")))
+
+    agent = None
+    if args.smartcharge:
+        agent = EVA
+    elif args.informed:
+        agent = SimpleEVPlannerInformed
+    elif args.delayed:
+        agent = SimpleEVPlannerDelayed
+    elif args.informed_delayed:
+        agent = SimpleEVPlannerDelayedInformed
+
+    simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month)
     simulator.run()
     # and print results
-    simulator.print_description()
+    # simulator.print_description()
     simulator.print_results()
 
 
@@ -662,7 +689,9 @@ if __name__ == '__main__':
     with open("config/common.yml", 'r') as ymlfile:
         cfg = yaml.load(ymlfile)
 
-    prod_algkey = cfg['algorithms']['production']
+    # prod_algkey = cfg['algorithms']['production']
+    prod_algkey = 'Renes'
+
     prod_algkey_var = cfg['algorithms']['production_var']
     cons_algkey = cfg['algorithms']['consumption']
 

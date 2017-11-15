@@ -16,7 +16,7 @@ def build_dataset(cfg):
     print("done ({:0.2f}sec)".format(elapsed))
 
     # trimming the dataset because before that we have bad values
-    dataset = dataset[datetime.datetime(2012, 9, 7, 0, 0, 0):]
+    dataset = dataset[datetime.datetime(2012, 9, 1, 0, 0, 0):]
 
     # scaling down the WTG
     dataset['WTG Production'] = cfg['adjustment']['wtg-scale'] * dataset['WTG Production']
