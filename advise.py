@@ -404,7 +404,7 @@ class DaySimulator:
 
         robustness = []
 
-        for d in tqdm(range(max_depth)):
+        for d in tqdm(range(max_depth), leave=False):
             if self.active_MPC or 'advise_unit' not in locals():
                 advise_unit = self._agent_class(
                     data=self.data,
@@ -469,7 +469,8 @@ class DaySimulator:
         # print("Usage Cost: {:0.2f}$".format(usage_cost))
         # print("Demand Cost: {:0.2f}$".format(self._pricing_model.get_demand_cost(max_demand)))
         # print("Final Cost: {:0.2f}$".format(usage_cost + self._pricing_model.get_demand_cost(max_demand)))
-
+        # import plotly.offline as py
+        # import plotly.graph_objs as go
         # data = [
         #     go.Scatter(
         #         x=current_day.index,  # assign x as the dataframe column 'x'
@@ -508,10 +509,10 @@ class BillingPeriodSimulator:
 
     def run(self):
 
-        for index, t in enumerate(self.test_times):
-            print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
+        for index, t in tqdm(enumerate(self.test_times), total=len(self.test_times), leave=True):
+            # print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-            print("Always using MPC")
+            # print("Always using MPC")
             use_mpc = True
 
             mpc = DaySimulator(self._data, self._agent_class, t[0], t[1], self.pricing_model,
