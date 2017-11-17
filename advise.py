@@ -378,8 +378,10 @@ class DaySimulator:
                 real_production_key])
         demand += 60 * (ev_charge / interval_in_minutes)
 
-        return max(demand.resample(datetime.timedelta(minutes=15)).mean().max(), 0)
-
+        if interval_in_minutes == 15:
+            return max(demand.mean(), 0)
+        else:
+            return max(demand.resample(datetime.timedelta(minutes=15)).mean().max(), 0)
     # return max(demand.max(), 0)
 
 
@@ -665,7 +667,7 @@ def main():
         pricing_model = pricing.USPricingModel(dataset.index)
 
     # choosing a valid month! (first one atm)
-    month = sorted(list(valid_months))[6]
+    month = sorted(list(valid_months))[2]
     print("Running for month: {}".format(month.strftime("%B %Y")))
 
     agent = None
