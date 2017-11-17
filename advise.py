@@ -341,7 +341,7 @@ class SimpleEVPlannerDelayedInformed(SimpleEVPlanner):
                          is_informed=True, is_delayed=True, delayed_start=None)
 
 
-class DaySimulator:
+class ChargingController:
     def __init__(self, data, agent_class, start: datetime.datetime, end: datetime.datetime,
                  pricing_model: pricing.PricingModel, max_demand=0, starting_charge=0.1,
                  active_MPC=True):
@@ -517,10 +517,10 @@ class BillingPeriodSimulator:
             # print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
 
-            mpc = DaySimulator(self._data, self._agent_class, t[0], t[1], self.pricing_model,
-                               max_demand=self.max_demand,
-                               starting_charge=t[2],
-                               active_MPC=self.use_mpc)
+            mpc = ChargingController(self._data, self._agent_class, t[0], t[1], self.pricing_model,
+                                     max_demand=self.max_demand,
+                                     starting_charge=t[2],
+                                     active_MPC=self.use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
 
             self.robustness_list.append(robustness)
@@ -530,10 +530,10 @@ class BillingPeriodSimulator:
             # creating a 'fake' mpc for the inbetween hours
 
             try:
-                mpc = DaySimulator(self._data, self._agent_class, t[1], self.test_times[index + 1][0],
-                                   self.pricing_model,
-                                   max_demand=self.max_demand,
-                                   starting_charge=1)
+                mpc = ChargingController(self._data, self._agent_class, t[1], self.test_times[index + 1][0],
+                                         self.pricing_model,
+                                         max_demand=self.max_demand,
+                                         starting_charge=1)
                 unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
                 unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
