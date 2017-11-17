@@ -492,7 +492,7 @@ class DaySimulator:
 
 
 class BillingPeriodSimulator:
-    def __init__(self, data, agent_class, pricing_model: pricing.PricingModel, month: datetime.date):
+    def __init__(self, data, agent_class, pricing_model: pricing.PricingModel, month: datetime.date, use_mpc):
 
         self._data = data
 
@@ -502,6 +502,8 @@ class BillingPeriodSimulator:
 
         date_start = month.replace(day=1)  # first day of the month
         date_end = datetime.date(month.year, month.month + 1, 1) - datetime.timedelta(days=1)  # last day of the month
+
+        self.use_mpc = use_mpc
 
         self.test_times = self.generate_arrive_leave_times(date_start, date_end, dataset_tz)
 
@@ -514,13 +516,11 @@ class BillingPeriodSimulator:
         for index, t in tqdm(enumerate(self.test_times), total=len(self.test_times), leave=True):
             # print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-            # print("Always using MPC")
-            use_mpc = True
 
             mpc = DaySimulator(self._data, self._agent_class, t[0], t[1], self.pricing_model,
                                max_demand=self.max_demand,
                                starting_charge=t[2],
-                               active_MPC=use_mpc)
+                               active_MPC=self.use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
 
             self.robustness_list.append(robustness)
@@ -624,6 +624,8 @@ def main():
     agent.add_argument('--delayed', action='store_true')
     agent.add_argument('--informed_delayed', action='store_true')
 
+    parser.add_argument('--no-mpc', action='store_true')
+
     args = parser.parse_args()
 
     cfg_filenames = ['config/common.yml']
@@ -680,7 +682,14 @@ def main():
     elif args.informed_delayed:
         agent = SimpleEVPlannerDelayedInformed
 
-    simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month)
+    use_mpc = not args.no_mpc
+
+    if use_mpc:
+        print("Using MPC")
+    else:
+        print("Not using MPC")
+
+    simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc)
     simulator.run()
     # and print results
     # simulator.print_description()
