@@ -21,6 +21,32 @@ from ier.ier import IER
 Charger = ChargerClass()
 
 
+def round_time(dt: datetime.datetime, dateDelta: datetime.timedelta):
+    """Round a datetime object to any time laps in seconds
+    dt : datetime.datetime object.
+    roundTo : Closest number of seconds to round to
+    """
+    roundTo = dateDelta.total_seconds()
+    seconds = (dt - dt.min).seconds
+    rounding = (seconds + roundTo / 2) // roundTo * roundTo
+    return dt + datetime.timedelta(0, rounding - seconds, -dt.microsecond)
+
+
+def random_time(mean: datetime.time, std: datetime.timedelta, date: datetime.date = None):
+    """Generates a random time object using a gaussian distribution
+    :param mean: in minutes
+    :param std: in minutes
+    :param date: (optional) if given, a datetime object will be returned
+    :return: a random time object (datetime if date is provided)
+    """
+    if date is None:
+        return (datetime.datetime.combine(datetime.date(1, 1, 1), mean) + datetime.timedelta(
+            seconds=np.random.normal(0, std.total_seconds()))).time()
+    else:
+        return datetime.datetime.combine(date, mean) + datetime.timedelta(
+            seconds=np.random.normal(0, std.total_seconds()))
+
+
 def calc_charge(action, interval, cur_charge):
     # Given that Charging rates are in kW and self.interval is in minutes, returns joules
 
@@ -382,6 +408,7 @@ class ChargingController:
             return max(demand.mean(), 0)
         else:
             return max(demand.resample(datetime.timedelta(minutes=15)).mean().max(), 0)
+
     # return max(demand.max(), 0)
 
 
@@ -568,44 +595,30 @@ class BillingPeriodSimulator:
         time_list = []
 
         while current_date < end_date:
+            # generate a disconnect time around 7:40 in the morning
+            round_interval = datetime.timedelta(minutes=15)
+            disconnect_time = round_time(
+                random_time(datetime.time(hour=7, minute=40), datetime.timedelta(minutes=34.2),
+                            current_date + datetime.timedelta(days=1)),
+                round_interval
+            )
+            connect_time = round_time(
+                random_time(datetime.time(hour=18, minute=38), datetime.timedelta(minutes=53.4), current_date),
+                round_interval
+            )
 
-            current_datetime = datetime.datetime.combine(current_date, datetime.time())
+            charging_timespan = disconnect_time - connect_time
 
-            # mean/std as taken from: Stochastic Optimal Energy Management of Smart Home with PEV Energy Storage
-
-            end_minutes = np.random.normal(460, 34.2)
-            start_minutes = np.random.normal(1118, 53.4)
-
-            # round to fifteen (minutes)
-            base = 15
-            round_to_fifteen = lambda x: int(base * round(float(x) / base))
-
-            start_minutes = round_to_fifteen(start_minutes)
-            end_minutes = round_to_fifteen(end_minutes)
-
-            # creating datetime
-
-            start_time = current_datetime + datetime.timedelta(minutes=start_minutes)
-            end_time = current_datetime + datetime.timedelta(days=1, minutes=end_minutes)
-
-            # putting timezone info
-
-            start_time = tz.localize(start_time)
-            end_time = tz.localize(end_time)
-
-            soc = np.random.uniform(0.2, 0.8)
-
-            # print("{} to {}".format(start_time, end_time))
-            # print(end_time-start_time)
+            soc = np.random.uniform(0.5, 0.9)
 
             # quality control
-            if (end_time - start_time > datetime.timedelta(hours=15) or end_time - start_time < datetime.timedelta(
-                    hours=8)):
+            if (charging_timespan > datetime.timedelta(hours=15) or charging_timespan < datetime.timedelta(hours=8)):
                 continue
 
-            time_list.append((start_time, end_time, soc))
+            time_list.append((connect_time, disconnect_time, soc))
             current_date += datetime.timedelta(days=1)
 
+        # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), time_list), sep='\n')
         return time_list
 
 
