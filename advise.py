@@ -86,6 +86,7 @@ class Node:
 
 
 class EVPlanner:
+    _name = 'Not Implemented'
     def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
                  target_battery,
                  interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.PricingModel):
@@ -117,6 +118,7 @@ class EVPlanner:
 
 
 class EVA(EVPlanner):
+    _name = 'SmartCharge'
     def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
                  target_battery,
                  interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.PricingModel):
@@ -343,6 +345,7 @@ class SimpleEVPlanner(EVPlanner):
 
 
 class SimpleEVPlannerDelayed(SimpleEVPlanner):
+    _name = 'Simple-Delayed'
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.PricingModel):
         super().__init__(data, current_time, end_time, current_battery, target_battery,
@@ -351,6 +354,7 @@ class SimpleEVPlannerDelayed(SimpleEVPlanner):
 
 
 class SimpleEVPlannerInformed(SimpleEVPlanner):
+    _name = 'Simple-Informed'
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.PricingModel):
         super().__init__(data, current_time, end_time, current_battery, target_battery,
@@ -359,6 +363,7 @@ class SimpleEVPlannerInformed(SimpleEVPlanner):
 
 
 class SimpleEVPlannerDelayedInformed(SimpleEVPlanner):
+    _name = 'Informed-Delayed'
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.PricingModel):
         super().__init__(data, current_time, end_time, current_battery,
@@ -575,12 +580,10 @@ class BillingPeriodSimulator:
             self.usage_cost += day_usage_cost
 
     def print_description(self):
-        print('Location: {}'.format(self._cfg['location']))
-        print('Month: {}'.format(self._cfg['dates']['month']))
-        print('Agent: {}'.format(self._cfg['advise-unit']))
-        print('Using MPC: {}'.format(self._cfg['USE_MPC']))
-        if self._cfg['advise-unit'] in ['delayed', 'informed-delayed']:
-            print('Delayed Start: {}:{}'.format(self._cfg['delay']['hour'], self._cfg['delay']['minute']))
+        print('Pricing Model: {}'.format(self.pricing_model._name))
+        print('Month: {}'.format(self.test_times[0][0].strftime("%B %Y")))
+        print('Agent: {}'.format(self._agent_class._name))
+        print('Using MPC: {}'.format(self.use_mpc))
 
     def print_results(self):
 
@@ -672,7 +675,7 @@ def main():
         print("Warning: valid months in the two datasets were not 100% matching. Using months common to both.")
 
     print('Found the following {} valid months in the datasets: '.format(len(valid_months)))
-    print(', '.join(map(str, [x.strftime("%B %Y") for x in valid_months])))
+    print(', '.join(map(str, [x.strftime("%B %Y") for x in sorted(valid_months)])))
 
     if args.uk:
         print("Using UK Pricing.")
@@ -682,7 +685,7 @@ def main():
         pricing_model = pricing.USPricingModel(dataset.index)
 
     # choosing a valid month! (first one atm)
-    month = sorted(list(valid_months))[2]
+    month = sorted(list(valid_months))[0]
     print("Running for month: {}".format(month.strftime("%B %Y")))
 
     agent = None
@@ -705,7 +708,7 @@ def main():
     simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc)
     simulator.run()
     # and print results
-    # simulator.print_description()
+    simulator.print_description()
     simulator.print_results()
 
 

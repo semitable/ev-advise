@@ -20,6 +20,7 @@ del cfg
 
 
 class PricingModel:
+    _name = 'Not Implemented'
     def setup_prices(self):
         raise NotImplemented()
 
@@ -49,6 +50,7 @@ class PricingModel:
 
 
 class EuropePricingModel(PricingModel):
+    _name = 'Europe'
     def has_demand_prices(self):
         return False
 
@@ -84,6 +86,7 @@ class EuropePricingModel(PricingModel):
 
 
 class USPricingModel(PricingModel):
+    _name = 'US'
     def has_demand_prices(self):
         return True
 
