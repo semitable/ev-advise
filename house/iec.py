@@ -24,6 +24,10 @@ except:
 cons_col = 'House Consumption'
 
 
+class NoSimilarMomentsFound(Exception):
+    pass
+
+
 def cosine_similarity(a, b):
     """Calculate the cosine similarity between
     two non-zero vectors of equal length (https://en.wikipedia.org/wiki/Cosine_similarity)
@@ -74,6 +78,10 @@ def find_similar_days(training_data, observation_length, k, interval, method=cos
         (training_data.index > min_time)
     )
     similar_moments = training_data[selector][:-1].tz_convert('UTC')
+
+    if similar_moments.empty:
+        raise NoSimilarMomentsFound
+
     training_data = training_data.tz_convert('UTC')
 
     last_day_vector = (training_data
@@ -331,8 +339,15 @@ class IEC(object):
         # observation_length is ALL of the current day (till now) + 4 hours
         observation_length = mins_in_day(self.now) + observation_length_addition
 
-        similar_moments = find_similar_days(
-            training_data, observation_length, k, similarity_interval, method=baseline_similarity)
+        try:
+            similar_moments = find_similar_days(
+                training_data, observation_length, k, similarity_interval, method=baseline_similarity)
+        except NoSimilarMomentsFound:
+            # no similar moments were found by our approach.. returning a mean of the last few hours
+            recent_baseline = training_data[-recent_baseline_length:-1].mean()[cons_col]
+            baseline = np.repeat(recent_baseline, self.prediction_window)
+            baseline[0] = training_data.tail(1)[cons_col]
+            return baseline
 
         baseline = calc_baseline(
             training_data, similar_moments, self.prediction_window, half_window, method=gauss_filt, interp_range=0)
