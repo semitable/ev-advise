@@ -615,7 +615,7 @@ class BillingPeriodSimulator:
             if (charging_timespan > datetime.timedelta(hours=15) or charging_timespan < datetime.timedelta(hours=8)):
                 continue
 
-            time_list.append((connect_time, disconnect_time, soc))
+            time_list.append((tz.localize(connect_time), tz.localize(disconnect_time), soc))
             current_date += datetime.timedelta(days=1)
 
         # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), time_list), sep='\n')
