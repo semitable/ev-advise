@@ -21,6 +21,7 @@ del cfg
 
 class PricingModel:
     _name = 'Not Implemented'
+    _cheap_period = (None, None)
     def setup_prices(self):
         raise NotImplemented()
 
@@ -51,6 +52,7 @@ class PricingModel:
 
 class EuropePricingModel(PricingModel):
     _name = 'Europe'
+    _cheap_period = (datetime.time(hour=00, minute=00), datetime.time(hour=5, minute=00))
     def has_demand_prices(self):
         return False
 
@@ -87,6 +89,7 @@ class EuropePricingModel(PricingModel):
 
 class USPricingModel(PricingModel):
     _name = 'US'
+    _cheap_period = (datetime.time(hour=21, minute=30), datetime.time(hour=8, minute=30))
     def has_demand_prices(self):
         return True
 

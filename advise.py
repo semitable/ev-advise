@@ -312,7 +312,8 @@ class SimpleEVPlanner(EVPlanner):
             cur_date = current_time.date() - datetime.timedelta(days=1)  # else we are probably after midnight
 
         if is_delayed:
-            self.delayed_start_time = dataset_tz.localize(datetime.datetime.combine(cur_date, delayed_start))
+            self.delayed_start_time = dataset_tz.localize(
+                datetime.datetime.combine(cur_date, self._pricing_model._cheap_period[0]))
 
     def calc_informed_charge(self):
         informed_charge = None
@@ -761,6 +762,8 @@ def main():
     # and print results
     simulator.print_description()
     simulator.print_results()
+    simulator.draw_period()
+    print(simulator.billing_period)
 
 
 if __name__ == '__main__':
