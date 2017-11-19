@@ -9,6 +9,8 @@ from itertools import zip_longest
 import networkx as nx
 import numpy as np
 import pandas as pd
+import plotly.graph_objs as go
+import plotly.offline as py
 import pytz
 import yaml
 from tqdm import tqdm
@@ -393,7 +395,8 @@ class ChargingController:
         self._pricing_model = pricing_model
 
         self.current_day = self.data[self.start:self.end][[real_production_key, real_consumption_key]]
-        self.current_day['House'] = self.current_day[real_production_key] - self.current_day[real_consumption_key]
+        self.current_day['House'] = self.current_day[real_consumption_key]
+        self.current_day['IER'] = self.current_day[real_production_key]
         self.current_day['EV'] = 0
 
     def calc_real_usage(self, time, interval, ev_charge):
@@ -545,7 +548,6 @@ class BillingPeriodSimulator:
 
         self.online_periods, self.offline_periods = self.generate_arrive_leave_times(date_start, date_end, dataset_tz)
 
-
         self.usage_cost = 0
         self.max_demand = 0
         self.robustness_list = []
@@ -558,8 +560,9 @@ class BillingPeriodSimulator:
                 freq='T',
                 tz=dataset_tz
             ),
-            columns=['House', 'EV']
+            columns=['House', 'IER', 'EV']
         )
+
     def run(self):
 
         for online_period, offline_period in tqdm(zip_longest(self.online_periods, self.offline_periods),
@@ -575,6 +578,7 @@ class BillingPeriodSimulator:
             unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
             self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
+            self.billing_period.loc[mpc.current_day.index, 'IER'] = mpc.current_day['IER']
             self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
 
             self.max_demand = max(self.max_demand, unplugged_demand)
@@ -594,31 +598,30 @@ class BillingPeriodSimulator:
             self.robustness_list.append(robustness)
 
             self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
+            self.billing_period.loc[mpc.current_day.index, 'IER'] = mpc.current_day['IER']
             self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
 
             self.max_demand = max(self.max_demand, day_max_demand)
             self.usage_cost += day_usage_cost
 
-
-        import plotly.offline as py
-        import plotly.graph_objs as go
+    def draw_period(self):
         data = [
             go.Scatter(
                 x=self.billing_period.index,  # assign x as the dataframe column 'x'
-                y=self.billing_period['House'],
-                name='House'
+                y=self.billing_period['House'] - self.billing_period['IER'],
+                name='Total house consumption (House - IER)'
             ),
             go.Scatter(
                 x=self.billing_period.index,  # assign x as the dataframe column 'x'
-                y=-self.billing_period['EV'] + self.billing_period['House'],
-                name='House & EV'
+                y=self.billing_period['EV'],
+                name='EV Consumption'
             ),
         ]
         py.plot(data)
 
     def print_description(self):
         print('Pricing Model: {}'.format(self.pricing_model._name))
-        print('Month: {}'.format(self.test_times[0][0].strftime("%B %Y")))
+        print('Month: {}'.format(self.online_periods[0][0].strftime("%B %Y")))
         print('Agent: {}'.format(self._agent_class._name))
         print('Using MPC: {}'.format(self.use_mpc))
 
