@@ -670,7 +670,7 @@ class BillingPeriodSimulator:
 
         # at the end just append a last disconnect time
         offline_periods.append((tz.localize(prev_disconnect),
-                                tz.localize(datetime.datetime.combine(end_date, datetime.time(hour=23, minute=45)))))
+                                tz.localize(datetime.datetime.combine(end_date, datetime.time(hour=23, minute=59)))))
         # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), online_periods), sep='\n')
         # print(*map(lambda x: "{} - {}".format(str(x[0].time()), str(x[1].time())), offline_periods), sep='\n')
 
