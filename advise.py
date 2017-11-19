@@ -87,6 +87,7 @@ class Node:
 
 class EVPlanner:
     _name = 'Not Implemented'
+
     def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
                  target_battery,
                  interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.PricingModel):
@@ -119,6 +120,7 @@ class EVPlanner:
 
 class EVA(EVPlanner):
     _name = 'SmartCharge'
+
     def __init__(self, data, current_time: datetime.datetime, end_time: datetime.datetime, current_battery,
                  target_battery,
                  interval: datetime.timedelta, action_set, starting_max_demand, pricing_model: pricing.PricingModel):
@@ -346,6 +348,7 @@ class SimpleEVPlanner(EVPlanner):
 
 class SimpleEVPlannerDelayed(SimpleEVPlanner):
     _name = 'Simple-Delayed'
+
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.PricingModel):
         super().__init__(data, current_time, end_time, current_battery, target_battery,
@@ -355,6 +358,7 @@ class SimpleEVPlannerDelayed(SimpleEVPlanner):
 
 class SimpleEVPlannerInformed(SimpleEVPlanner):
     _name = 'Simple-Informed'
+
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.PricingModel):
         super().__init__(data, current_time, end_time, current_battery, target_battery,
@@ -364,6 +368,7 @@ class SimpleEVPlannerInformed(SimpleEVPlanner):
 
 class SimpleEVPlannerDelayedInformed(SimpleEVPlanner):
     _name = 'Informed-Delayed'
+
     def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
                  starting_max_demand, pricing_model: pricing.PricingModel):
         super().__init__(data, current_time, end_time, current_battery,
@@ -385,6 +390,10 @@ class ChargingController:
         self.active_MPC = active_MPC
 
         self._pricing_model = pricing_model
+
+        self.current_day = self.data[self.start:self.end][[real_production_key, real_consumption_key]]
+        self.current_day['House'] = self.current_day[real_production_key] - self.current_day[real_consumption_key]
+        self.current_day['EV'] = 0
 
     def calc_real_usage(self, time, interval, ev_charge):
 
@@ -431,10 +440,6 @@ class ChargingController:
 
         usage_cost = 0
         max_demand = self.max_starting_demand
-
-        current_day = self.data[self.start:self.end][[real_production_key, real_consumption_key]]
-        current_day['House'] = current_day[real_production_key] - current_day[real_consumption_key]
-        current_day['EV'] = 0
 
         robustness = []
 
@@ -486,8 +491,8 @@ class ChargingController:
             # print(current_charge)
             # print("For time {} to {}, took action {} and charged to: {}".format(advise_unit.get_real_time(0), advise_unit.get_real_time(interval), action, current_charge))
 
-            current_day.loc[
-                current_day.index >= current_time, 'EV'] = battery_consumption * 60 / interval.total_seconds()
+            self.current_day.loc[
+                self.current_day.index >= current_time, 'EV'] = battery_consumption * 60 / interval.total_seconds()
 
             # Taking said action
 
@@ -543,6 +548,16 @@ class BillingPeriodSimulator:
         self.max_demand = 0
         self.robustness_list = []
 
+        self.billing_period = pd.DataFrame(
+            index=pd.date_range(
+                datetime.datetime.combine(date_start, datetime.time()),
+                datetime.datetime.combine(date_end, datetime.time()) + datetime.timedelta(days=1) - datetime.timedelta(
+                    minutes=1),
+                freq='T',
+                tz=dataset_tz
+            ),
+            columns=['House', 'EV']
+        )
     def run(self):
 
         for index, t in tqdm(enumerate(self.test_times), total=len(self.test_times), leave=True):
@@ -557,6 +572,14 @@ class BillingPeriodSimulator:
 
             self.robustness_list.append(robustness)
 
+            # mpc.current_day = mpc.current_day.reindex(pd.date_range(mpc.current_day.index[0],mpc.current_day.index[-1],freq='T'))['House']
+            self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
+            self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
+
+            # print(self.billing_period['House'])
+            # exit()
+
+
             self.max_demand = max(self.max_demand, day_max_demand)
 
             # creating a 'fake' mpc for the inbetween hours
@@ -569,6 +592,9 @@ class BillingPeriodSimulator:
                 unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
                 unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
 
+                self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
+                self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
+
                 # print("========", unplugged_demand, max_demand, "===========")
 
                 self.max_demand = max(self.max_demand, unplugged_demand)
@@ -578,6 +604,22 @@ class BillingPeriodSimulator:
                 pass
 
             self.usage_cost += day_usage_cost
+
+        import plotly.offline as py
+        import plotly.graph_objs as go
+        data = [
+            go.Scatter(
+                x=self.billing_period.index,  # assign x as the dataframe column 'x'
+                y=self.billing_period['House'],
+                name='House'
+            ),
+            go.Scatter(
+                x=self.billing_period.index,  # assign x as the dataframe column 'x'
+                y=-self.billing_period['EV'] + self.billing_period['House'],
+                name='House & EV'
+            ),
+        ]
+        py.plot(data)
 
     def print_description(self):
         print('Pricing Model: {}'.format(self.pricing_model._name))
