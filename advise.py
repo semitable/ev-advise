@@ -4,6 +4,7 @@ EV advise unit
 import argparse
 import datetime
 import random
+from itertools import zip_longest
 
 import networkx as nx
 import numpy as np
@@ -542,7 +543,8 @@ class BillingPeriodSimulator:
 
         self.use_mpc = use_mpc
 
-        self.test_times = self.generate_arrive_leave_times(date_start, date_end, dataset_tz)
+        self.online_periods, self.offline_periods = self.generate_arrive_leave_times(date_start, date_end, dataset_tz)
+
 
         self.usage_cost = 0
         self.max_demand = 0
@@ -560,50 +562,43 @@ class BillingPeriodSimulator:
         )
     def run(self):
 
-        for index, t in tqdm(enumerate(self.test_times), total=len(self.test_times), leave=True):
+        for online_period, offline_period in tqdm(zip_longest(self.online_periods, self.offline_periods),
+                                                  total=len(self.online_periods), leave=True):
             # print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
-
-            mpc = ChargingController(self._data, self._agent_class, t[0], t[1], self.pricing_model,
+            # first the offline period:
+            mpc = ChargingController(self._data, self._agent_class, offline_period[0], offline_period[1],
+                                     self.pricing_model,
                                      max_demand=self.max_demand,
-                                     starting_charge=t[2],
+                                     starting_charge=1)  # starting_charge == 1 means we will not charge! :-)
+            unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
+            unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
+
+            self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
+            self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
+
+            self.max_demand = max(self.max_demand, unplugged_demand)
+            self.usage_cost += unplugged_usage
+
+            # then our online period!
+            if online_period == None:
+                continue  # offline periods are more since they are both in the beginning and at the end
+
+            mpc = ChargingController(self._data, self._agent_class, online_period[0], online_period[1],
+                                     self.pricing_model,
+                                     max_demand=self.max_demand,
+                                     starting_charge=online_period[2],
                                      active_MPC=self.use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
 
             self.robustness_list.append(robustness)
 
-            # mpc.current_day = mpc.current_day.reindex(pd.date_range(mpc.current_day.index[0],mpc.current_day.index[-1],freq='T'))['House']
             self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
             self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
 
-            # print(self.billing_period['House'])
-            # exit()
-
-
             self.max_demand = max(self.max_demand, day_max_demand)
-
-            # creating a 'fake' mpc for the inbetween hours
-
-            try:
-                mpc = ChargingController(self._data, self._agent_class, t[1], self.test_times[index + 1][0],
-                                         self.pricing_model,
-                                         max_demand=self.max_demand,
-                                         starting_charge=1)
-                unplugged_demand = mpc.calc_real_demand(mpc.start, mpc.end - mpc.start, 0)
-                unplugged_usage = mpc.calc_real_usage(mpc.start, mpc.end - mpc.start, 0)
-
-                self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
-                self.billing_period.loc[mpc.current_day.index, 'EV'] = mpc.current_day['EV']
-
-                # print("========", unplugged_demand, max_demand, "===========")
-
-                self.max_demand = max(self.max_demand, unplugged_demand)
-                self.usage_cost += unplugged_usage
-            except IndexError:
-                # our period is over :-)
-                pass
-
             self.usage_cost += day_usage_cost
+
 
         import plotly.offline as py
         import plotly.graph_objs as go
@@ -637,7 +632,10 @@ class BillingPeriodSimulator:
     def generate_arrive_leave_times(self, start_date, end_date, tz):
 
         current_date = start_date
-        time_list = []
+
+        prev_disconnect = datetime.datetime.combine(start_date, datetime.time())
+        online_periods = []
+        offline_periods = []
 
         while current_date < end_date:
             # generate a disconnect time around 7:40 in the morning
@@ -660,11 +658,19 @@ class BillingPeriodSimulator:
             if (charging_timespan > datetime.timedelta(hours=15) or charging_timespan < datetime.timedelta(hours=8)):
                 continue
 
-            time_list.append((tz.localize(connect_time), tz.localize(disconnect_time), soc))
+            online_periods.append((tz.localize(connect_time), tz.localize(disconnect_time), soc))
+            offline_periods.append((tz.localize(prev_disconnect), tz.localize(connect_time)))
+            prev_disconnect = disconnect_time
+
             current_date += datetime.timedelta(days=1)
 
-        # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), time_list), sep='\n')
-        return time_list
+        # at the end just append a last disconnect time
+        offline_periods.append((tz.localize(prev_disconnect),
+                                tz.localize(datetime.datetime.combine(end_date, datetime.time(hour=23, minute=45)))))
+        # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), online_periods), sep='\n')
+        # print(*map(lambda x: "{} - {}".format(str(x[0].time()), str(x[1].time())), offline_periods), sep='\n')
+
+        return online_periods, offline_periods
 
 
 def main():
