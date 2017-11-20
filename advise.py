@@ -19,6 +19,7 @@ import pricing
 from battery import Charger as ChargerClass
 from house import IEC
 from ier.ier import IER
+from safehdf import SafeHDF5Store
 
 # a global charger to take advantage of result caching
 Charger = ChargerClass()
@@ -590,6 +591,15 @@ class BillingPeriodSimulator:
         fig = go.Figure(data=data, layout=layout)
         py.plot(fig)
 
+    def get_metadata(self):
+        metadata = {
+            'pricing': self.pricing_model._name,
+            'month': self.online_periods[0][0].strftime("%b%Y"),
+            'agent': self._agent_class._name,
+            'mpc': self.use_mpc
+        }
+        return metadata
+
     def print_description(self):
         print('Pricing Model: {}'.format(self.pricing_model._name))
         print('Month: {}'.format(self.online_periods[0][0].strftime("%B %Y")))
@@ -645,6 +655,23 @@ class BillingPeriodSimulator:
         # print(*map(lambda x: "{} - {}".format(str(x[0].time()), str(x[1].time())), offline_periods), sep='\n')
 
         return online_periods, offline_periods
+
+
+def write_hdf(f, key, df, meta=None, complib='zlib'):
+    """Append pandas dataframe to hdf5.
+
+    Args:
+    f       -- File path
+    key     -- Store key
+    df      -- Pandas dataframe
+    complib -- Compress lib 
+
+    NOTE: We use maximum compression w/ zlib.
+    """
+
+    with SafeHDF5Store(f, complevel=9, complib=complib) as store:
+        df.to_hdf(store, key, format='table')
+        store.get_storer(key).attrs.meta = meta
 
 
 def main():
@@ -733,8 +760,14 @@ def main():
     simulator.print_description()
     simulator.print_results()
     # simulator.draw_period()
+    meta = simulator.get_metadata()
+    name = "{}.{}.{}.{}".format(meta['agent'], meta['pricing'], meta['month'], meta['mpc'])
+    # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
+    results = simulator.billing_period.tz_convert('UTC')
+    cols = ['House', 'IER', 'EV']
+    results[cols] = results[cols].apply(pd.to_numeric)
 
-    simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
+    write_hdf('results.h5', name, results, meta=meta, complib='zlib')
 
 
 if __name__ == '__main__':
