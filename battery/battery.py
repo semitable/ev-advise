@@ -187,7 +187,7 @@ class Charger:
         self.battery.set_open_circuit()
         self.battery.calc_charging_voltage()
 
-        self.dt = 1
+        self.dt = 0.01
 
         self.hit = 0
         self.total = 0
