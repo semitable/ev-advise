@@ -166,8 +166,8 @@ class EVA(EVPlanner):
         if interval_in_minutes <= 0:
             return 0
 
-        m2 = self.prod_prediction[time:time + interval][prod_algkey]
-        m1 = self.cons_prediction[time:time + interval][cons_algkey]
+        m2 = self.prod_prediction[time:time + interval - datetime.timedelta(minutes=1)][prod_algkey]
+        m1 = self.cons_prediction[time:time + interval - datetime.timedelta(minutes=1)][cons_algkey]
 
         usage = m1 + ev_charge / interval_in_minutes - m2
 
@@ -406,8 +406,8 @@ class ChargingController:
         if interval_in_minutes <= 0:
             return 0
 
-        m2 = self.data[time:time + interval][real_production_key]
-        m1 = self.data[time:time + interval][real_consumption_key]
+        m2 = self.data[time:time + interval - datetime.timedelta(minutes=1)][real_production_key]
+        m1 = self.data[time:time + interval - datetime.timedelta(minutes=1)][real_consumption_key]
 
         usage = m1 + ev_charge / interval_in_minutes - m2
 
@@ -492,7 +492,6 @@ class ChargingController:
 
             # print(current_charge)
             current_charge, battery_consumption = calc_charge_with_error(action, interval, current_charge)
-
             # print(current_charge)
             # print("For time {} to {}, took action {} and charged to: {}".format(advise_unit.get_real_time(0), advise_unit.get_real_time(interval), action, current_charge))
 
@@ -500,7 +499,6 @@ class ChargingController:
                 self.current_day.index >= current_time, 'EV'] = battery_consumption * 60 / interval.total_seconds()
 
             # Taking said action
-
             usage_cost += self.calc_real_usage(current_time, interval, battery_consumption)
             max_demand = max(max_demand, self.calc_real_demand(current_time, interval, battery_consumption))
 
@@ -565,7 +563,6 @@ class BillingPeriodSimulator:
         )
 
     def run(self):
-
         for online_period, offline_period in tqdm(zip_longest(self.online_periods, self.offline_periods),
                                                   total=len(self.online_periods), leave=True):
             # print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
@@ -595,7 +592,6 @@ class BillingPeriodSimulator:
                                      starting_charge=online_period[2],
                                      active_MPC=self.use_mpc)
             day_usage_cost, day_max_demand, robustness = mpc.run()
-
             self.robustness_list.append(robustness)
 
             self.billing_period.loc[mpc.current_day.index, 'House'] = mpc.current_day['House']
@@ -703,7 +699,7 @@ def main():
     agent.add_argument('--smartcharge', action='store_true')
     agent.add_argument('--informed', action='store_true')
     agent.add_argument('--delayed', action='store_true')
-    agent.add_argument('--informed_delayed', action='store_true')
+    agent.add_argument('--informed-delayed', action='store_true')
 
     parser.add_argument('--no-mpc', action='store_true')
 
@@ -775,8 +771,9 @@ def main():
     # and print results
     simulator.print_description()
     simulator.print_results()
-    simulator.draw_period()
-    print(simulator.billing_period)
+    # simulator.draw_period()
+
+    simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
 
 
 if __name__ == '__main__':
