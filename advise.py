@@ -450,7 +450,9 @@ class ChargingController:
 
         robustness = []
 
-        for d in tqdm(range(max_depth), leave=False):
+        hide_tqdm = (not self.active_MPC) or suppress_tqdm
+
+        for d in tqdm(range(max_depth), leave=False, disable=hide_tqdm):
             if self.active_MPC or 'advise_unit' not in locals():
                 advise_unit = self._agent_class(
                     data=self.data,
@@ -526,7 +528,7 @@ class BillingPeriodSimulator:
 
     def run(self):
         for online_period, offline_period in tqdm(zip_longest(self.online_periods, self.offline_periods),
-                                                  total=len(self.online_periods), leave=True):
+                                                  total=len(self.online_periods), leave=True, disable=suppress_tqdm):
             # print("Running from {} to {}. Starting SoC: {}".format(t[0], t[1], t[2]))
 
             # first the offline period:
@@ -691,6 +693,8 @@ def main():
 
     parser.add_argument('--no-mpc', action='store_true')
 
+    parser.add_argument('--suppress-tqdm', action='store_true')
+
     args = parser.parse_args()
 
     cfg_filenames = ['config/common.yml']
@@ -753,6 +757,9 @@ def main():
         print("Using MPC")
     else:
         print("Not using MPC")
+
+    global suppress_tqdm
+    suppress_tqdm = args.suppress_tqdm
 
     simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc)
     simulator.run()
