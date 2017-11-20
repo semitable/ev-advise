@@ -68,10 +68,10 @@ class PricingModel:
         layout = go.Layout(
             title='Plot Title',
             xaxis=dict(
-                title='Price',
+                title='Time (Local Time)',
             ),
             yaxis=dict(
-                title='Time (Local Time)',
+                title='Price',
             )
         )
         fig = go.Figure(data=data, layout=layout)
