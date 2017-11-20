@@ -462,24 +462,6 @@ class ChargingController:
                     starting_max_demand=max_demand,
                     pricing_model=self._pricing_model
                 )
-                # advise_unit = SimpleEVPlanner(
-                #     data=self.data,
-                #     current_time=current_time,
-                #     end_time=self.end,
-                #     current_battery=current_charge,
-                #     target_battery=target_charge,
-                #     interval=interval,
-                #     action_set=action_set,
-                #     starting_max_demand=max_demand,
-                #     pricing_model=self._pricing_model,
-                #     is_informed=(self._cfg['advise-unit'] in ['informed', 'informed-delayed']),
-                #     is_delayed=(self._cfg['advise-unit'] in ['delayed', 'informed-delayed']),
-                #     delayed_start=datetime.time(hour=self._cfg['delay']['hour'],
-                #                                 minute=self._cfg['delay']['minute']) if self._cfg[
-                #                                                                             'advise-unit'] in [
-                #                                                                             'delayed',
-                #                                                                             'informed-delayed'] else None
-                # )
 
             if self.active_MPC:
                 result = advise_unit.advise()
@@ -506,28 +488,6 @@ class ChargingController:
             current_time = current_time + interval
 
         robustness.append(current_charge)
-
-        # print("Battery cache hit: {:0.2f}".format(Charger.hit / Charger.total))
-        # print("Battery State: {:0.2f}%".format(100 * current_charge))
-        # print("Usage Cost: {:0.2f}$".format(usage_cost))
-        # print("Demand Cost: {:0.2f}$".format(self._pricing_model.get_demand_cost(max_demand)))
-        # print("Final Cost: {:0.2f}$".format(usage_cost + self._pricing_model.get_demand_cost(max_demand)))
-        # import plotly.offline as py
-        # import plotly.graph_objs as go
-        # data = [
-        #     go.Scatter(
-        #         x=current_day.index,  # assign x as the dataframe column 'x'
-        #         y=current_day['House'],
-        #         name='House'
-        #     ),
-        #     go.Scatter(
-        #         x=current_day.index,  # assign x as the dataframe column 'x'
-        #         y=-current_day['EV'] + current_day['House'],
-        #         name='House & EV'
-        #     ),
-        # ]
-        # py.plot(data)
-
 
         return usage_cost, max_demand, robustness
 
