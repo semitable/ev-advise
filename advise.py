@@ -624,10 +624,10 @@ class BillingPeriodSimulator:
         layout = go.Layout(
             title='Plot Title',
             xaxis=dict(
-                title='kWh',
+                title='Time (Local Time)',
             ),
             yaxis=dict(
-                title='Time (Local Time)',
+                title='kWh',
             )
         )
         fig = go.Figure(data=data, layout=layout)
