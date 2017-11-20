@@ -725,7 +725,7 @@ def main():
     wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
     wind_data.index = wind_data.index.set_levels(
         [wind_data.index.levels[0], pd.to_timedelta(wind_data.index.levels[1])])
-
+    wind_data = wind_data.tz_localize('UTC', level=0).tz_convert(dataset_tz, level=0)
     # simulate a billing period
 
     dataset = pd.read_csv('house_data.csv.gz', parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
