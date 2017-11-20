@@ -5,8 +5,9 @@ Filippos Christianos
 import datetime
 
 import pandas as pd
+import plotly.graph_objs as go
+import plotly.offline as py
 import yaml
-
 # we have implemented two pricing models: US and UK
 
 PRICING_MODELS = ('UK_PRICING', 'US_PRICING')
@@ -48,6 +49,33 @@ class PricingModel:
 
     def ideal_charging_cost(self, charge):
         return self._min_price * charge
+
+    def draw_prices(self):
+        # plotly fix for timezone correction
+        naive_df = self._prices.tz_localize(None)  # (this way we will display in local time, like we want to)
+        data = [
+            go.Scatter(
+                x=naive_df.index,  # assign x as the dataframe column 'x'
+                y=naive_df[usage_cost_key],
+                name='Usage Cost'
+            ),
+            go.Scatter(
+                x=naive_df.index,  # assign x as the dataframe column 'x'
+                y=naive_df[sell_price_key],
+                name='Sell Price'
+            ),
+        ]
+        layout = go.Layout(
+            title='Plot Title',
+            xaxis=dict(
+                title='Price',
+            ),
+            yaxis=dict(
+                title='Time (Local Time)',
+            )
+        )
+        fig = go.Figure(data=data, layout=layout)
+        py.plot(fig)
 
 
 class EuropePricingModel(PricingModel):

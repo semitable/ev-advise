@@ -606,19 +606,32 @@ class BillingPeriodSimulator:
             self.usage_cost += day_usage_cost
 
     def draw_period(self):
+
+        # ugly plotly fix:
+        naive_df = self.billing_period.tz_localize(None)
         data = [
             go.Scatter(
-                x=self.billing_period.index,  # assign x as the dataframe column 'x'
-                y=self.billing_period['House'] - self.billing_period['IER'],
+                x=naive_df.index,  # assign x as the dataframe column 'x'
+                y=naive_df['House'] - naive_df['IER'],
                 name='Total house consumption (House - IER)'
             ),
             go.Scatter(
-                x=self.billing_period.index,  # assign x as the dataframe column 'x'
-                y=self.billing_period['EV'],
+                x=naive_df.index,  # assign x as the dataframe column 'x'
+                y=naive_df['EV'],
                 name='EV Consumption'
             ),
         ]
-        py.plot(data)
+        layout = go.Layout(
+            title='Plot Title',
+            xaxis=dict(
+                title='kWh',
+            ),
+            yaxis=dict(
+                title='Time (Local Time)',
+            )
+        )
+        fig = go.Figure(data=data, layout=layout)
+        py.plot(fig)
 
     def print_description(self):
         print('Pricing Model: {}'.format(self.pricing_model._name))
