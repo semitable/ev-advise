@@ -182,7 +182,8 @@ class EVA(EVPlanner):
             return 0
 
         demand = 60 * (
-            self.cons_prediction[time:time + interval][cons_algkey] - self.prod_prediction[time:time + interval][
+            self.cons_prediction[time:time + interval - datetime.timedelta(minutes=1)][cons_algkey] -
+            self.prod_prediction[time:time + interval - datetime.timedelta(minutes=1)][
                 prod_algkey])
         demand += 60 * (ev_charge / interval_in_minutes)
         # return max(demand.max(), 0)
@@ -419,8 +420,8 @@ class ChargingController:
             return 0
 
         demand = 60 * (
-            self.data[time:time + interval][real_consumption_key] - self.data[time:time + interval][
-                real_production_key])
+            self.data[time:time + interval - datetime.timedelta(minutes=1)][real_consumption_key] -
+            self.data[time:time + interval - datetime.timedelta(minutes=1)][real_production_key])
         demand += 60 * (ev_charge / interval_in_minutes)
 
         if interval_in_minutes == 15:
