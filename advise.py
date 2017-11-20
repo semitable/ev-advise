@@ -695,6 +695,8 @@ def main():
 
     parser.add_argument('--suppress-tqdm', action='store_true')
 
+    parser.add_argument('--month-index', metavar='i', type=int, nargs=1)
+
     args = parser.parse_args()
 
     cfg_filenames = ['config/common.yml']
@@ -737,8 +739,7 @@ def main():
         print("Using US Pricing.")
         pricing_model = pricing.USPricingModel(dataset.index)
 
-    # choosing a valid month! (first one atm)
-    month = sorted(list(valid_months))[0]
+    month = sorted(list(valid_months))[args.month_index[0]]
     print("Running for month: {}".format(month.strftime("%B %Y")))
 
     agent = None
