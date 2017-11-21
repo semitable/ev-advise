@@ -763,8 +763,9 @@ def main():
     suppress_tqdm = args.suppress_tqdm
 
     # dont forget to seed our RNG!
-    np.random.seed(cfg['random-seed'] + month.year + month.month)
-    random.seed(cfg['random-seed'] + month.year + month.month)
+    random_seed = cfg['random-seed'] + month.year + month.month
+    np.random.seed(random_seed)
+    random.seed(random_seed)
 
     simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc)
     simulator.run()
@@ -773,6 +774,12 @@ def main():
     simulator.print_results()
     # simulator.draw_period()
     meta = simulator.get_metadata()
+    # some extra metadata
+    meta['wtg-scale'] = cfg['adjustment']['wtg-scale']
+    meta['house-scale'] = cfg['adjustment']['house-scale']
+    meta['actions'] = cfg['actions']
+    meta['seed'] = random_seed
+
     name = "{}.{}.{}.{}".format(meta['agent'], meta['pricing'], meta['month'], meta['mpc'])
     # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
     results = simulator.billing_period.tz_convert('UTC')
