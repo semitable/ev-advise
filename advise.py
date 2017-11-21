@@ -780,6 +780,8 @@ def main():
     meta['actions'] = cfg['battery']['actions']
     meta['seed'] = random_seed
     meta['execution-date'] = datetime.datetime.now()
+    meta['ier-type'] = 'wind'
+    meta['online-periods'] = 'night-only'
 
     name = "{}.{}.{}.{}".format(meta['agent'], meta['pricing'], meta['month'], meta['mpc'])
     # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
