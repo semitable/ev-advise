@@ -707,9 +707,6 @@ def main():
         with open(f, 'r') as ymlfile:
             cfg.update(yaml.load(ymlfile))
 
-    # dont forget to seed our RNG!
-    np.random.seed(cfg['random-seed'])
-    random.seed(cfg['random-seed'])
 
     # wind dataset is a multli index since it also has predictions from meteo stations
     wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
@@ -761,6 +758,10 @@ def main():
 
     global suppress_tqdm
     suppress_tqdm = args.suppress_tqdm
+
+    # dont forget to seed our RNG!
+    np.random.seed(cfg['random-seed'] + month.year + month.month)
+    random.seed(cfg['random-seed'] + month.year + month.month)
 
     simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc)
     simulator.run()
