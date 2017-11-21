@@ -779,6 +779,7 @@ def main():
     meta['house-scale'] = cfg['adjustment']['house-scale']
     meta['actions'] = cfg['actions']
     meta['seed'] = random_seed
+    meta['execution-date'] = datetime.datetime.now()
 
     name = "{}.{}.{}.{}".format(meta['agent'], meta['pricing'], meta['month'], meta['mpc'])
     # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
