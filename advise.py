@@ -777,7 +777,7 @@ def main():
     # some extra metadata
     meta['wtg-scale'] = cfg['adjustment']['wtg-scale']
     meta['house-scale'] = cfg['adjustment']['house-scale']
-    meta['actions'] = cfg['actions']
+    meta['actions'] = cfg['battery']['actions']
     meta['seed'] = random_seed
     meta['execution-date'] = datetime.datetime.now()
 
