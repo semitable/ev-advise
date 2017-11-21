@@ -717,6 +717,9 @@ def main():
 
     dataset = pd.read_csv('house_data.csv.gz', parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
+    dataset['House Consumption'] = dataset['House Consumption'] * cfg['adjustment']['house-scale']
+    dataset['WTG Production'] = dataset['WTG Production'] * cfg['adjustment']['wtg-scale']
+
     # in the dataset find valid months
     months_house = [x.date() for x in dataset.groupby(pd.TimeGrouper(freq='M')).count().index.tolist()]
     months_wind = [x.date() for x in wind_data.xs(datetime.timedelta(0), level=1).groupby(

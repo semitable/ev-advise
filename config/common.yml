@@ -18,7 +18,7 @@ prices:
 
 
 adjustment:
-    wtg-scale: 1
+    wtg-scale: 3
     house-scale: 1
 
 random-seed: 1337
