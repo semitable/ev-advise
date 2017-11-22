@@ -7,17 +7,11 @@ import datetime
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.offline as py
-import yaml
+
+from constants import *
 # we have implemented two pricing models: US and UK
 
 PRICING_MODELS = ('UK_PRICING', 'US_PRICING')
-
-with open("config/common.yml", 'r') as ymlfile:
-    cfg = yaml.load(ymlfile)
-
-usage_cost_key = cfg['prices']['usage_cost_key']
-sell_price_key = cfg['prices']['sell_price_key']
-del cfg
 
 
 class PricingModel:

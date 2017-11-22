@@ -1,21 +1,6 @@
-
-algorithms:
-    production: 'Renes Hybrid'
-    production_var: 'Renes Hybrid STD'
-    consumption: 'Baseline Finder'
-
-truth:
-    consumption: 'House Consumption'
-    production: 'WTG Production'
-
 dataset:
     filename: 'dataset-kw.gz'
     timezone: 'Europe/Zurich'
-
-prices:
-    usage_cost_key: 'Buy Price'
-    sell_price_key: 'Sell Price'
-
 
 adjustment:
     wtg-scale: 3

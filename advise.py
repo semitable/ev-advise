@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 import pricing
 from battery import Charger as ChargerClass
+from constants import *
 from house import IEC
 from ier.ier import IER
 from safehdf import SafeHDF5Store
@@ -811,14 +812,6 @@ if __name__ == '__main__':
     with open("config/common.yml", 'r') as ymlfile:
         cfg = yaml.load(ymlfile)
 
-    # prod_algkey = cfg['algorithms']['production']
-    prod_algkey = 'Renes'
-
-    prod_algkey_var = cfg['algorithms']['production_var']
-    cons_algkey = cfg['algorithms']['consumption']
-
-    real_consumption_key = cfg['truth']['consumption']
-    real_production_key = cfg['truth']['production']
 
     dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
     del cfg
