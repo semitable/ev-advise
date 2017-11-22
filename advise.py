@@ -383,6 +383,17 @@ class SimpleEVPlannerDelayedInformed(SimpleEVPlanner):
                          is_informed=True, is_delayed=True, delayed_start=None)
 
 
+class DummyEVPlanner(SimpleEVPlanner):
+    _name = 'Dummy'
+
+    def __init__(self, data, current_time, end_time, current_battery, target_battery, interval, action_set,
+                 starting_max_demand, pricing_model: pricing.PricingModel):
+        super().__init__(data, current_time, end_time, current_battery,
+                         target_battery, interval,
+                         action_set, starting_max_demand, pricing_model,
+                         is_informed=False, is_delayed=False, delayed_start=None)
+
+
 class ChargingController:
     def __init__(self, data, agent_class, start: datetime.datetime, end: datetime.datetime,
                  pricing_model: pricing.PricingModel, max_demand=0, starting_charge=0.1,
@@ -688,6 +699,7 @@ def main():
     agent = parser.add_mutually_exclusive_group(required=True)
     agent.add_argument('--smartcharge', action='store_true')
     agent.add_argument('--informed', action='store_true')
+    agent.add_argument('--dummy', action='store_true')
     agent.add_argument('--delayed', action='store_true')
     agent.add_argument('--informed-delayed', action='store_true')
 
@@ -751,6 +763,8 @@ def main():
         agent = SimpleEVPlannerDelayed
     elif args.informed_delayed:
         agent = SimpleEVPlannerDelayedInformed
+    elif args.dummy:
+        agent = DummyEVPlanner
 
     use_mpc = not args.no_mpc
 
