@@ -4,6 +4,7 @@ EV advise unit
 import argparse
 import datetime
 import random
+import sys
 from itertools import zip_longest
 
 import networkx as nx
@@ -688,7 +689,7 @@ def write_hdf(f, key, df, meta=None, complib='zlib'):
         store.get_storer(key).attrs.meta = meta
 
 
-def main():
+def main(*args):
     # argument parser
 
     parser = argparse.ArgumentParser()
@@ -710,7 +711,7 @@ def main():
 
     parser.add_argument('--month-index', metavar='i', type=int, nargs=1)
 
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     cfg_filenames = ['config/common.yml']
 
@@ -816,4 +817,4 @@ if __name__ == '__main__':
     dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
     del cfg
 
-    main()
+    main(*sys.argv[1:])
