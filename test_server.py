@@ -49,7 +49,8 @@ def build_args(args_dict):
     mpc = mpc_arg[mpc_all.index(args_dict['mpc'])]
     month_index = months_all.index(args_dict['month'])
 
-    return filter(lambda x: x is not None, [pricing, agent, mpc, '--month-index', str(month_index), '--suppress-tqdm'])
+    return filter(lambda x: x is not None,
+                  [pricing, agent, mpc, '--month-index', str(month_index), '--suppress-tqdm', '--quiet'])
 
 
 def get_existing_results():
