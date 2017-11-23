@@ -12,7 +12,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
 import plotly.offline as py
-import pytz
 import yaml
 from tqdm import tqdm
 
@@ -805,16 +804,13 @@ def main(*args):
     cols = ['House', 'IER', 'EV']
     results[cols] = results[cols].apply(pd.to_numeric)
 
-    write_hdf('results.h5', name, results, meta=meta, complib='zlib')
+    # write_hdf('results.h5', name, results, meta=meta, complib='zlib')
+    return {
+        'key': name,
+        'meta': meta,
+        'results': results
+    }
 
 
 if __name__ == '__main__':
-    # some constants (column names)
-    with open("config/common.yml", 'r') as ymlfile:
-        cfg = yaml.load(ymlfile)
-
-
-    dataset_tz = pytz.timezone(cfg['dataset']['timezone'])
-    del cfg
-
     main(*sys.argv[1:])
