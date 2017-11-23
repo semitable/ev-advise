@@ -1,4 +1,5 @@
 import datetime
+import logging
 from functools import partial
 
 import GPy
@@ -16,7 +17,10 @@ col_production = 'WTG Production'
 col_prediction = 'WTG Prediction'
 
 # load predictions
-print("reading wind predictions...")
+
+logger = logging.getLogger('advise-unit')
+
+logger.info("reading wind predictions...")
 wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
 wind_data.index = wind_data.index.set_levels([wind_data.index.levels[0], pd.to_timedelta(wind_data.index.levels[1])])
 wind_data = wind_data.tz_localize('UTC', level=0).tz_convert('Europe/Zurich', level=0)

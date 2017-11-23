@@ -3,6 +3,7 @@ EV advise unit
 """
 import argparse
 import datetime
+import logging
 import random
 import sys
 from itertools import zip_longest
@@ -25,6 +26,7 @@ from safehdf import SafeHDF5Store
 # a global charger to take advantage of result caching
 Charger = ChargerClass()
 
+logger = logging.getLogger('advise-unit')
 
 def round_time(dt: datetime.datetime, dateDelta: datetime.timedelta):
     """Round a datetime object to any time laps in seconds
@@ -615,17 +617,18 @@ class BillingPeriodSimulator:
         return metadata
 
     def print_description(self):
-        print('Pricing Model: {}'.format(self.pricing_model._name))
-        print('Month: {}'.format(self.online_periods[0][0].strftime("%B %Y")))
-        print('Agent: {}'.format(self._agent_class._name))
-        print('Using MPC: {}'.format(self.use_mpc))
+        logger.info('Pricing Model: {}'.format(self.pricing_model._name))
+        logger.info('Month: {}'.format(self.online_periods[0][0].strftime("%B %Y")))
+        logger.info('Agent: {}'.format(self._agent_class._name))
+        logger.info('Using MPC: {}'.format(self.use_mpc))
 
     def print_results(self):
 
-        print("Robustness: {:0.2f}%".format(100 * np.mean(self.robustness_list)))
-        print("Usage Cost: {:0.2f}$".format(self.usage_cost))
-        print("Demand Cost: {:0.2f}$".format(self.pricing_model.get_demand_cost(self.max_demand)))
-        print("Final Cost: {:0.2f}$".format(self.usage_cost + self.pricing_model.get_demand_cost(self.max_demand)))
+        logger.info("Robustness: {:0.2f}%".format(100 * np.mean(self.robustness_list)))
+        logger.info("Usage Cost: {:0.2f}$".format(self.usage_cost))
+        logger.info("Demand Cost: {:0.2f}$".format(self.pricing_model.get_demand_cost(self.max_demand)))
+        logger.info(
+            "Final Cost: {:0.2f}$".format(self.usage_cost + self.pricing_model.get_demand_cost(self.max_demand)))
 
     def generate_arrive_leave_times(self, start_date, end_date, tz):
 
@@ -693,6 +696,10 @@ def main(*args):
 
     parser = argparse.ArgumentParser()
 
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument("-v", "--verbose", action="store_true")
+    verbosity.add_argument("-q", "--quiet", action="store_true")
+
     location = parser.add_mutually_exclusive_group(required=True)
     location.add_argument('--us', action='store_true')
     location.add_argument('--uk', action='store_true')
@@ -711,6 +718,18 @@ def main(*args):
     parser.add_argument('--month-index', metavar='i', type=int, nargs=1)
 
     args = parser.parse_args(args)
+
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    ch.setLevel(logging.DEBUG)
+    logger.addHandler(ch)
+
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+    elif args.quiet:
+        logger.setLevel(logging.WARNING)
+    else:
+        logger.setLevel(logging.INFO)
 
     cfg_filenames = ['config/common.yml']
 
@@ -740,20 +759,20 @@ def main(*args):
 
     valid_months = set(months_house) & set(months_wind)
     if (set(months_house) != set(months_wind)):
-        print("Warning: valid months in the two datasets were not 100% matching. Using months common to both.")
+        logger.warning("Valid months in the two datasets were not 100% matching. Using months common to both.")
 
-    print('Found the following {} valid months in the datasets: '.format(len(valid_months)))
-    print(', '.join(map(str, [x.strftime("%B %Y") for x in sorted(valid_months)])))
+    logger.debug('Found the following {} valid months in the datasets: '.format(len(valid_months)))
+    logger.debug(', '.join(map(str, [x.strftime("%B %Y") for x in sorted(valid_months)])))
 
     if args.uk:
-        print("Using UK Pricing.")
+        logger.info("Using UK Pricing.")
         pricing_model = pricing.EuropePricingModel(dataset.index)
     else:
-        print("Using US Pricing.")
+        logger.info("Using US Pricing.")
         pricing_model = pricing.USPricingModel(dataset.index)
 
     month = sorted(list(valid_months))[args.month_index[0]]
-    print("Running for month: {}".format(month.strftime("%B %Y")))
+    logger.info("Running for month: {}".format(month.strftime("%B %Y")))
 
     agent = None
     if args.smartcharge:
@@ -770,9 +789,9 @@ def main(*args):
     use_mpc = not args.no_mpc
 
     if use_mpc:
-        print("Using MPC")
+        logger.info("Using MPC")
     else:
-        print("Not using MPC")
+        logger.info("Not using MPC")
 
     global suppress_tqdm
     suppress_tqdm = args.suppress_tqdm

@@ -1,4 +1,6 @@
 import itertools
+import logging
+import sys
 from multiprocessing import Pool, cpu_count
 
 import pandas as pd
@@ -7,6 +9,7 @@ import advise
 from advise import write_hdf
 from constants import _RESULTS_FILE
 
+logger = logging.getLogger('ev-advise-tester')
 
 def extract_args_from_meta(meta):
     return {
@@ -80,7 +83,14 @@ def main():
 
     func_map = p.imap_unordered(worker, args_list)
 
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    ch.setLevel(logging.DEBUG)
+    logger.addHandler(ch)
+    logger.setLevel(logging.INFO)
+
     for result in func_map:
+        logger.info('Writing {} result to hdf'.format(result['key']))
         write_hdf(_RESULTS_FILE, result['key'], result['results'], meta=result['meta'], complib='zlib')
 
 
