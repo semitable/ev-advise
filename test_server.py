@@ -1,5 +1,6 @@
 import itertools
 import logging
+import signal
 import sys
 from multiprocessing import Pool, cpu_count
 
@@ -63,6 +64,20 @@ def get_existing_results():
     return existing
 
 
+class DelayedKeyboardInterrupt(object):
+    def __enter__(self):
+        self.signal_received = False
+        self.old_handler = signal.signal(signal.SIGINT, self.handler)
+
+    def handler(self, sig, frame):
+        self.signal_received = (sig, frame)
+        logging.debug('SIGINT received. Delaying KeyboardInterrupt.')
+
+    def __exit__(self, type, value, traceback):
+        signal.signal(signal.SIGINT, self.old_handler)
+        if self.signal_received:
+            self.old_handler(*self.signal_received)
+
 def worker(args):
     return advise.main(*args)
 
@@ -73,7 +88,7 @@ def main():
 
     not_executed = set(permutations) - set(existing)
 
-    not_executed = list(filter(lambda x: x[1] != 'smartcharge', not_executed))
+    # not_executed = list(filter(lambda x: x[1] != 'smartcharge', not_executed))
 
     args_list = [list(build_args(get_args_dict_from_tuple(t))) for t in not_executed]
 
@@ -91,8 +106,9 @@ def main():
     logger.setLevel(logging.INFO)
 
     for result in func_map:
-        logger.info('Writing {} result to hdf'.format(result['key']))
-        write_hdf(_RESULTS_FILE, result['key'], result['results'], meta=result['meta'], complib='zlib')
+        with DelayedKeyboardInterrupt():
+            logger.info('Writing {} result to hdf'.format(result['key']))
+            write_hdf(_RESULTS_FILE, result['key'], result['results'], meta=result['meta'], complib='zlib')
 
 
 if __name__ == '__main__':
