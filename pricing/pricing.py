@@ -74,7 +74,7 @@ class PricingModel:
 
 class EuropePricingModel(PricingModel):
     _name = 'Europe'
-    _cheap_period = (datetime.time(hour=00, minute=00), datetime.time(hour=5, minute=00))
+    _cheap_period = (datetime.time(hour=23, minute=59), datetime.time(hour=5, minute=00))  # ugly fix for delayed agent
     def has_demand_prices(self):
         return False
 
