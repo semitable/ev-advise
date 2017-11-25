@@ -511,7 +511,8 @@ class ChargingController:
 
 
 class BillingPeriodSimulator:
-    def __init__(self, data, agent_class, pricing_model: pricing.PricingModel, month: datetime.date, use_mpc):
+    def __init__(self, data, agent_class, pricing_model: pricing.PricingModel, month: datetime.date, use_mpc,
+                 lunch_break=False):
 
         self._data = data
 
@@ -524,7 +525,8 @@ class BillingPeriodSimulator:
 
         self.use_mpc = use_mpc
 
-        self.online_periods, self.offline_periods = self.generate_arrive_leave_times(date_start, date_end, dataset_tz)
+        self.online_periods, self.offline_periods = self.generate_arrive_leave_times(
+            date_start, date_end, dataset_tz, lunch_break=lunch_break)
 
         self.usage_cost = 0
         self.max_demand = 0
@@ -631,7 +633,7 @@ class BillingPeriodSimulator:
         logger.info(
             "Final Cost: {:0.2f}$".format(self.usage_cost + self.pricing_model.get_demand_cost(self.max_demand)))
 
-    def generate_arrive_leave_times(self, start_date, end_date, tz, lunch_break=False):
+    def generate_arrive_leave_times(self, start_date, end_date, tz, lunch_break):
 
         current_date = start_date
 
@@ -757,7 +759,9 @@ def main(*args):
 
     parser.add_argument('--suppress-tqdm', action='store_true')
 
-    parser.add_argument('--month-index', metavar='i', type=int, nargs=1)
+    parser.add_argument('--month-index', metavar='i', type=int, nargs=1, required=True)
+
+    parser.add_argument('--lunch-break', action='store_true')
 
     args = parser.parse_args(args)
 
@@ -828,6 +832,11 @@ def main(*args):
         agent = DummyEVPlanner
 
     use_mpc = not args.no_mpc
+    lunch_break = args.lunch_break
+    if lunch_break:
+        logger.info("Generating arrive/leave times with lunch break")
+    else:
+        logger.info("Generating only-night arrive/leave times")
 
     if use_mpc:
         logger.info("Using MPC")
@@ -842,7 +851,7 @@ def main(*args):
     np.random.seed(random_seed)
     random.seed(random_seed)
 
-    simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc)
+    simulator = BillingPeriodSimulator(dataset, agent, pricing_model, month, use_mpc, lunch_break)
     simulator.run()
     # and print results
     simulator.print_description()
@@ -856,7 +865,11 @@ def main(*args):
     meta['seed'] = random_seed
     meta['execution-date'] = datetime.datetime.now()
     meta['ier-type'] = 'wind'
-    meta['online-periods'] = 'night-only'
+
+    if lunch_break:
+        meta['online-periods'] = 'with-lunch'
+    else:
+        meta['online-periods'] = 'night-only'
 
     name = "{}.{}.{}.{}".format(meta['agent'], meta['pricing'], meta['month'], meta['mpc'])
     # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
