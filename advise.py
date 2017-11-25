@@ -6,6 +6,7 @@ import datetime
 import logging
 import random
 import sys
+import uuid
 from itertools import zip_longest
 
 import networkx as nx
@@ -871,7 +872,7 @@ def main(*args):
     else:
         meta['online-periods'] = 'night-only'
 
-    name = "{}.{}.{}.{}".format(meta['agent'], meta['pricing'], meta['month'], meta['mpc'])
+    name = uuid.uuid4().hex
     # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
     results = simulator.billing_period.tz_convert('UTC')
     cols = ['House', 'IER', 'EV']
