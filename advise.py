@@ -687,7 +687,11 @@ class BillingPeriodSimulator:
                 charging_timespan_night = disconnect_time - connect_time_night
                 charging_timespan_lunch = disconnect_time_lunch - connect_time_lunch
 
-                # todo: quality control for lunch!
+                if ((charging_timespan_lunch > datetime.timedelta(hours=5)
+                     or charging_timespan_lunch < datetime.timedelta(hours=3))
+                    and (charging_timespan_night > datetime.timedelta(hours=13)
+                         or charging_timespan_night < datetime.timedelta(hours=7))):
+                    continue
 
                 soc_night = np.random.uniform(0.6, 0.9)
                 soc_lunch = np.random.uniform(0.8, 0.95)
