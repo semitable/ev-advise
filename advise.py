@@ -882,7 +882,8 @@ def main(*args):
     return {
         'key': name,
         'meta': meta,
-        'results': results
+        'results': results,
+        'robustness': simulator.robustness_list
     }
 
 
