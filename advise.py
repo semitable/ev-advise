@@ -28,6 +28,7 @@ Charger = ChargerClass()
 
 logger = logging.getLogger('advise-unit')
 
+
 def round_time(dt: datetime.datetime, dateDelta: datetime.timedelta):
     """Round a datetime object to any time laps in seconds
     dt : datetime.datetime object.
@@ -630,7 +631,7 @@ class BillingPeriodSimulator:
         logger.info(
             "Final Cost: {:0.2f}$".format(self.usage_cost + self.pricing_model.get_demand_cost(self.max_demand)))
 
-    def generate_arrive_leave_times(self, start_date, end_date, tz):
+    def generate_arrive_leave_times(self, start_date, end_date, tz, lunch_break=False):
 
         current_date = start_date
 
@@ -638,36 +639,73 @@ class BillingPeriodSimulator:
         online_periods = []
         offline_periods = []
 
+        round_interval = datetime.timedelta(minutes=15)
+
         while current_date < end_date:
-            # generate a disconnect time around 7:40 in the morning
-            round_interval = datetime.timedelta(minutes=15)
+            # generate a disconnect time around 7:40 in the morning (for both cases)
             disconnect_time = round_time(
                 random_time(datetime.time(hour=7, minute=40), datetime.timedelta(minutes=34.2),
                             current_date + datetime.timedelta(days=1)),
                 round_interval
             )
-            connect_time = round_time(
-                random_time(datetime.time(hour=18, minute=38), datetime.timedelta(minutes=53.4), current_date),
-                round_interval
-            )
 
-            charging_timespan = disconnect_time - connect_time
+            if not lunch_break:
+                connect_time = round_time(
+                    random_time(datetime.time(hour=18, minute=38), datetime.timedelta(minutes=53.4), current_date),
+                    round_interval
+                )
 
-            soc = np.random.uniform(0.5, 0.9)
+                charging_timespan = disconnect_time - connect_time
+                soc = np.random.uniform(0.5, 0.9)
 
-            # quality control
-            if (charging_timespan > datetime.timedelta(hours=15) or charging_timespan < datetime.timedelta(hours=8)):
-                continue
+                # quality control
+                if (charging_timespan > datetime.timedelta(hours=15) or charging_timespan < datetime.timedelta(
+                        hours=8)):
+                    continue
 
-            online_periods.append((tz.localize(connect_time), tz.localize(disconnect_time), soc))
-            offline_periods.append((tz.localize(prev_disconnect), tz.localize(connect_time)))
+                online_periods.append((tz.localize(connect_time), tz.localize(disconnect_time), soc))
+                offline_periods.append((tz.localize(prev_disconnect), tz.localize(connect_time)))
+
+            elif lunch_break:
+                # we will have an extra charging period
+
+                connect_time_lunch = round_time(
+                    random_time(datetime.time(hour=13, minute=00), datetime.timedelta(minutes=20), current_date),
+                    round_interval
+                )
+
+                disconnect_time_lunch = round_time(
+                    random_time(datetime.time(hour=17, minute=00), datetime.timedelta(minutes=20),
+                                current_date + datetime.timedelta(days=1)),
+                    round_interval
+                )
+                connect_time_night = round_time(
+                    random_time(datetime.time(hour=20, minute=30), datetime.timedelta(minutes=20), current_date),
+                    round_interval
+                )
+
+                charging_timespan_night = disconnect_time - connect_time_night
+                charging_timespan_lunch = disconnect_time_lunch - connect_time_lunch
+
+                # todo: quality control for lunch!
+
+                soc_night = np.random.uniform(0.6, 0.9)
+                soc_lunch = np.random.uniform(0.8, 0.95)
+
+                online_periods.append((tz.localize(connect_time_lunch), tz.localize(disconnect_time_lunch), soc_lunch))
+                online_periods.append((tz.localize(connect_time_night), tz.localize(disconnect_time), soc_night))
+
+                offline_periods.append((tz.localize(prev_disconnect), tz.localize(connect_time_lunch)))
+                offline_periods.append((tz.localize(disconnect_time_lunch), tz.localize(connect_time_night)))
+
+            # finally:
             prev_disconnect = disconnect_time
-
             current_date += datetime.timedelta(days=1)
 
         # at the end just append a last disconnect time
         offline_periods.append((tz.localize(prev_disconnect),
                                 tz.localize(datetime.datetime.combine(end_date, datetime.time(hour=23, minute=59)))))
+
         # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), online_periods), sep='\n')
         # print(*map(lambda x: "{} - {}".format(str(x[0].time()), str(x[1].time())), offline_periods), sep='\n')
 
@@ -738,7 +776,6 @@ def main(*args):
     for f in cfg_filenames:
         with open(f, 'r') as ymlfile:
             cfg.update(yaml.load(ymlfile))
-
 
     # wind dataset is a multli index since it also has predictions from meteo stations
     wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
