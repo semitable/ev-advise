@@ -57,9 +57,8 @@ class IER(object):
 
         self.prediction_window = 16 * 60
         self.algorithms = {
-            "Renes": partial(self.renes, historical_offset=historical_offset),
+            "Renes": partial(self.renes, cur_time=self.now, prediction_window=self.prediction_window),
             "Renes Hybrid": partial(self.renes_gpy,
-                                    historical_offset=historical_offset,
                                     prediction_window=self.prediction_window),
         }
 
@@ -88,63 +87,62 @@ class IER(object):
 
         return predictions
 
-    def renes_gpy(self, historical_offset, prediction_window, stochastic_interval=60, training_cycles=2):
+    def renes_gpy(self, prediction_window, stochastic_interval=60, training_cycles=2):
 
-        training_length = training_cycles * prediction_window
+        try:
+            training_length = training_cycles * prediction_window
 
-        if (self.now - timedelta(minutes=training_length) < self.data.index[0]):
+            cur_time = self.now
+
+            prev_truth = []
+            prev_predictions = []
+
+            predictions = np.zeros((prediction_window, 2))
+            predictions[:, 0] = self.renes(self.now, prediction_window)
+
+            for i in range(training_cycles + 1, 1, -1):
+                test_time = cur_time - timedelta(minutes=prediction_window) * i
+
+                t = self.data[col_production][test_time:test_time + timedelta(minutes=prediction_window - 1)] / 60
+                p = self.renes(test_time, prediction_window)
+
+                prev_truth = np.concatenate([prev_truth, t.values])
+                prev_predictions = np.concatenate([prev_predictions, p])
+
+            index = np.arange(stochastic_interval, training_length, stochastic_interval)
+            temp = prev_truth - prev_predictions
+
+            x1 = np.atleast_2d(index / float(training_length)).T
+            y1 = np.atleast_2d(np.mean(temp.reshape(-1, stochastic_interval), axis=1)[:-1]).T
+            std = np.std(y1[:, 0])
+            y1[:, 0] = (y1[:, 0]) / std
+
+            # Train GP
+            kernel = GPy.kern.Matern32(1)  # , variance=0.1, lengthscale=float(intervalST/float(TrainingLength)))
+            m = GPy.models.GPRegression(x1, y1, kernel=kernel)
+            m.optimize()
+            #
+            # m.plot()
+            # pylab.show(block=True)
+
+            # Initialize and standardize GP input set
+            x = np.atleast_2d(
+                np.arange(training_length, training_length + prediction_window, 1) / float(training_length)).T
+
+            # GP Predict
+            y_mean, y_var = m.predict(x)
+
+            # Destandardize output
+            y_mean *= std
+            y_var *= std ** 2
+
+            # todo check bound to physical limits
+            # Populate array (1st element is the ground truth) and bound to physical limits
+            nominal_power_wtg = 3000 * 60  # 3 Kw --> 3*60 joule (in a minute) #np.inf
+            predictions[1:, 0] = np.clip(predictions[1:, 0] + y_mean[1:, 0], 0, np.inf)
+            predictions[1:, 1] = y_var[1:, 0]
+
+            predictions = predictions[:, 0]
+            return predictions
+        except:
             return self.renes(self.now, prediction_window)
-
-        cur_time = self.now
-
-        prev_truth = []
-        prev_predictions = []
-
-        predictions = np.zeros((prediction_window, 2))
-        predictions[:, 0] = self.renes(self.now, prediction_window)
-
-        for i in range(training_cycles + 1, 1, -1):
-            test_time = cur_time - timedelta(minutes=prediction_window) * i
-
-            t = self.data[col_production][test_time:test_time + timedelta(minutes=prediction_window - 1)] / 60
-            p = self.renes(test_time, prediction_window)
-
-            prev_truth = np.concatenate([prev_truth, t.values])
-            prev_predictions = np.concatenate([prev_predictions, p])
-
-
-
-        index = np.arange(stochastic_interval, training_length, stochastic_interval)
-        temp = prev_truth - prev_predictions
-
-        x1 = np.atleast_2d(index / float(training_length)).T
-        y1 = np.atleast_2d(np.mean(temp.reshape(-1, stochastic_interval), axis=1)[:-1]).T
-        std = np.std(y1[:, 0])
-        y1[:, 0] = (y1[:, 0]) / std
-
-        # Train GP
-        kernel = GPy.kern.Matern32(1)  # , variance=0.1, lengthscale=float(intervalST/float(TrainingLength)))
-        m = GPy.models.GPRegression(x1, y1, kernel=kernel)
-        m.optimize()
-        #
-        # m.plot()
-        # pylab.show(block=True)
-
-        # Initialize and standardize GP input set
-        x = np.atleast_2d(np.arange(training_length, training_length + prediction_window, 1) / float(training_length)).T
-
-        # GP Predict
-        y_mean, y_var = m.predict(x)
-
-        # Destandardize output
-        y_mean *= std
-        y_var *= std ** 2
-
-        # todo check bound to physical limits
-        # Populate array (1st element is the ground truth) and bound to physical limits
-        nominal_power_wtg = 3000 * 60  # 3 Kw --> 3*60 joule (in a minute) #np.inf
-        predictions[1:, 0] = np.clip(predictions[1:, 0] + y_mean[1:, 0], 0, np.inf)
-        predictions[1:, 1] = y_var[1:, 0]
-
-        predictions = predictions[:, 0]
-        return predictions
