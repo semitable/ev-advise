@@ -1,6 +1,6 @@
 import pytz
 
-prod_algkey = 'Renes'
+prod_algkey = 'Renes Hybrid'
 prod_algkey_var = 'Renes Hybrid STD'
 cons_algkey = 'Baseline Finder'
 

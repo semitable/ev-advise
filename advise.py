@@ -7,6 +7,7 @@ import logging
 import random
 import sys
 import uuid
+from collections import namedtuple
 from itertools import zip_longest
 
 import networkx as nx
@@ -734,6 +735,11 @@ def write_hdf(f, key, df, meta=None, complib='zlib'):
     with SafeHDF5Store(f, complevel=9, complib=complib) as store:
         df.to_hdf(store, key, format='table')
         store.get_storer(key).attrs.meta = meta
+
+
+ResultMetaData = namedtuple('results_meta',
+                            ['agent', 'pricing', 'battery_actions', 'execution_date', 'house_scale',
+                             'wtg_scale', 'ier_type', 'month', 'mpc', 'online_periods', 'seed'])
 
 
 def main(*args):

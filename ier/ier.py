@@ -1,5 +1,5 @@
-import datetime
 import logging
+from datetime import timedelta
 from functools import partial
 
 import GPy
@@ -21,14 +21,14 @@ col_prediction = 'WTG Prediction'
 logger = logging.getLogger('advise-unit')
 
 logger.info("reading wind predictions...")
-wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
-wind_data.index = wind_data.index.set_levels([wind_data.index.levels[0], pd.to_timedelta(wind_data.index.levels[1])])
-wind_data = wind_data.tz_localize('UTC', level=0).tz_convert('Europe/Zurich', level=0)
+iers = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
+iers.index = iers.index.set_levels([iers.index.levels[0], pd.to_timedelta(iers.index.levels[1])])
+iers = iers.tz_localize('UTC', level=0).tz_convert('Europe/Zurich', level=0)
 
 with open("config/common.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
 
-wind_data['Windspeed'] = wind_data['Windspeed'] * cfg['adjustment']['wtg-scale']
+iers['Windspeed'] = iers['Windspeed'] * cfg['adjustment']['wtg-scale']
 
 '''
 @returns predictions from renes
@@ -58,7 +58,9 @@ class IER(object):
         self.prediction_window = 16 * 60
         self.algorithms = {
             "Renes": partial(self.renes, historical_offset=historical_offset),
-            "Renes Hybrid": partial(self.renes_hybrid, historical_offset=historical_offset),
+            "Renes Hybrid": partial(self.renes_gpy,
+                                    historical_offset=historical_offset,
+                                    prediction_window=self.prediction_window),
         }
 
     def predict(self, alg_keys):
@@ -75,59 +77,56 @@ class IER(object):
 
         return result
 
-    def renes(self, prediction_window=16 * 60, historical_offset=0):
-
-        assert historical_offset > prediction_window, "Not enough predictions available from renes"
+    def renes(self, cur_time, prediction_window):
 
         predictions = np.zeros(prediction_window)
-        predictions[:] = np.squeeze((wind_data.loc[self.now.replace(minute=0)].resample('1T').interpolate() / 60)[
-                                    datetime.timedelta(minutes=self.now.minute):datetime.timedelta(
-                                        minutes=prediction_window + self.now.minute - 1)].values)
-        # predictions[:] = self.data[-historical_offset:-historical_offset + prediction_window][col_prediction].values
-        predictions[0] = self.data.iloc[-historical_offset][col_production]  # 0 is the ground truth...
+        predictions[:] = (iers.loc[cur_time.replace(minute=0)].resample('1T').interpolate() / 60)[
+                         timedelta(minutes=cur_time.minute):timedelta(
+                             minutes=prediction_window + cur_time.minute - 1)]['Windspeed'].values
+
+        predictions[0] = self.data.loc[cur_time][col_production]  # 0 is the ground truth...
+
         return predictions
 
-    def renes_hybrid(self, training_cycle=2, prediction_window=16 * 60, historical_offset=0, stochastic_interval=2):
+    def renes_gpy(self, historical_offset, prediction_window, stochastic_interval=60, training_cycles=2):
 
-        assert historical_offset > prediction_window, "Not enough predictions available from renes"
+        training_length = training_cycles * prediction_window
 
-        training_length = (training_cycle * prediction_window)
+        if (self.now - timedelta(minutes=training_length) < self.data.index[0]):
+            return self.renes(self.now, prediction_window)
 
-        # Fetch historical predictions from dataset according to TrainingCycle
-        prev_predictions = self.renes(prediction_window=training_length,
-                                      historical_offset=historical_offset + training_length)
+        cur_time = self.now
+
+        prev_truth = []
+        prev_predictions = []
 
         predictions = np.zeros((prediction_window, 2))
-        predictions[:, 0] = self.renes(prediction_window=prediction_window, historical_offset=historical_offset)
+        predictions[:, 0] = self.renes(self.now, prediction_window)
 
-        # Fetch data given the TrainingCycle and PredictionWindow
-        ground_truth = self.data[-historical_offset - training_length:-historical_offset][
-            col_production].values  # Shift by one to align timestamps (prediction vs truth)
+        for i in range(training_cycles + 1, 1, -1):
+            test_time = cur_time - timedelta(minutes=prediction_window) * i
 
-        # print Predictions[:,0]
-        # print dataset[-HistoricalOffset-TrainingLength:-HistoricalOffset+1, 0]
+            t = self.data[col_production][test_time:test_time + timedelta(minutes=prediction_window - 1)] / 60
+            p = self.renes(test_time, prediction_window)
 
-        # Initialize and standardize GP training set
+            prev_truth = np.concatenate([prev_truth, t.values])
+            prev_predictions = np.concatenate([prev_predictions, p])
+
+
 
         index = np.arange(stochastic_interval, training_length, stochastic_interval)
-
-        temp = ground_truth - prev_predictions
+        temp = prev_truth - prev_predictions
 
         x1 = np.atleast_2d(index / float(training_length)).T
-
         y1 = np.atleast_2d(np.mean(temp.reshape(-1, stochastic_interval), axis=1)[:-1]).T
-
         std = np.std(y1[:, 0])
         y1[:, 0] = (y1[:, 0]) / std
-
-        # print x1, y1
 
         # Train GP
         kernel = GPy.kern.Matern32(1)  # , variance=0.1, lengthscale=float(intervalST/float(TrainingLength)))
         m = GPy.models.GPRegression(x1, y1, kernel=kernel)
-
         m.optimize()
-
+        #
         # m.plot()
         # pylab.show(block=True)
 
@@ -144,7 +143,8 @@ class IER(object):
         # todo check bound to physical limits
         # Populate array (1st element is the ground truth) and bound to physical limits
         nominal_power_wtg = 3000 * 60  # 3 Kw --> 3*60 joule (in a minute) #np.inf
-        predictions[1:, 0] = np.clip(predictions[1:, 0] + y_mean[1:, 0], 0, nominal_power_wtg)
+        predictions[1:, 0] = np.clip(predictions[1:, 0] + y_mean[1:, 0], 0, np.inf)
         predictions[1:, 1] = y_var[1:, 0]
 
+        predictions = predictions[:, 0]
         return predictions
