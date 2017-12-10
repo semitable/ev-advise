@@ -29,9 +29,12 @@ mpc_all = (True, False)
 mpc_arg = (None, '--no-mpc')
 months_all = ('Jan2017', 'Feb2017', 'Mar2017', 'Apr2017', 'May2017', 'Jun2017', 'Jul2017')
 
+ier_type_all = ('solar', 'wind')
+ier_type_args = ('--solar-only', '--wind-only')
+
 
 def get_hash_tuple(args):
-    return (args['pricing'], args['agent'], args['mpc'], args['month'])
+    return (args['pricing'], args['agent'], args['mpc'], args['month'], args['ier-type'])
 
 
 def get_args_dict_from_tuple(t):
@@ -39,7 +42,8 @@ def get_args_dict_from_tuple(t):
         'pricing': t[0],
         'agent': t[1],
         'mpc': t[2],
-        'month': t[3]
+        'month': t[3],
+        'ier-type': t[4],
     }
     return args
 
@@ -49,9 +53,10 @@ def build_args(args_dict):
     agent = agents_arg[agents_all.index(args_dict['agent'])]
     mpc = mpc_arg[mpc_all.index(args_dict['mpc'])]
     month_index = months_all.index(args_dict['month'])
+    ier_type = ier_type_args[ier_type_all.index(args_dict['ier-type'])]
 
     return filter(lambda x: x is not None,
-                  [pricing, agent, mpc, '--month-index', str(month_index), '--suppress-tqdm', '--quiet'])
+                  [pricing, agent, mpc, '--month-index', str(month_index), ier_type, '--suppress-tqdm', '--quiet'])
 
 
 def get_existing_results():
@@ -84,7 +89,7 @@ def worker(args):
 
 def main():
     existing = [get_hash_tuple(v['meta']) for v in get_existing_results()]
-    permutations = list(itertools.product(pricing_all, agents_all, mpc_all, months_all))
+    permutations = list(itertools.product(pricing_all, agents_all, mpc_all, months_all, ier_type_all))
 
     not_executed = set(permutations) - set(existing)
 
