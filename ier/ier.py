@@ -7,28 +7,22 @@ import numpy as np
 import pandas as pd
 import yaml
 
-# Load dataset
-# dataset = np.loadtxt('data.dat')
-
-
-# COL_TIMESTAMP = ''
-# COL_WATTAGE = 2
-col_production = 'WTG Production'
-col_prediction = 'WTG Prediction'
-
-# load predictions
+from constants import *
 
 logger = logging.getLogger('advise-unit')
 
+# load predictions
+
 logger.info("reading wind predictions...")
-iers = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
+iers = pd.read_csv("iers.csv.gz", index_col=[0, 1], parse_dates=True)
 iers.index = iers.index.set_levels([iers.index.levels[0], pd.to_timedelta(iers.index.levels[1])])
 iers = iers.tz_localize('UTC', level=0).tz_convert('Europe/Zurich', level=0)
 
 with open("config/common.yml", 'r') as ymlfile:
     cfg = yaml.load(ymlfile)
 
-iers['Windspeed'] = iers['Windspeed'] * cfg['adjustment']['wtg-scale']
+iers[PREDICTIONS_WIND] = iers[PREDICTIONS_WIND] * cfg['adjustment']['wind-scale']
+iers[PREDICTIONS_SOLAR] = iers[PREDICTIONS_SOLAR] * cfg['adjustment']['solar-scale']
 
 '''
 @returns predictions from renes
@@ -41,7 +35,7 @@ class IER(object):
     for a given prediction window using historical data.
     """
 
-    def __init__(self, data, current_time):
+    def __init__(self, data, current_time, type):
         """Initializing the IEC.
 
         Args:
@@ -50,6 +44,16 @@ class IER(object):
         """
         self.data = data
         self.now = current_time
+
+        if type == 'solar':
+            self.prediction_key = PREDICTIONS_SOLAR
+            self.production_key = REAL_SOLAR_PRODUCTION
+        elif type == 'wind':
+            self.prediction_key = PREDICTIONS_WIND
+            self.production_key = REAL_WIND_PRODUCTION
+        else:
+            raise NotImplemented("type must be solar or wind")
+
 
         # cheesy solution to find historical_offset as thanos used it...
         window_stop_row = data[data.index == current_time].iloc[-1]
@@ -81,13 +85,13 @@ class IER(object):
         predictions = np.zeros(prediction_window)
         predictions[:] = (iers.loc[cur_time.replace(minute=0)].resample('1T').interpolate() / 60)[
                          timedelta(minutes=cur_time.minute):timedelta(
-                             minutes=prediction_window + cur_time.minute - 1)]['Windspeed'].values
+                             minutes=prediction_window + cur_time.minute - 1)][self.prediction_key].values
 
-        predictions[0] = self.data.loc[cur_time][col_production]  # 0 is the ground truth...
+        predictions[0] = self.data.loc[cur_time][self.production_key]  # 0 is the ground truth...
 
         return predictions
 
-    def renes_gpy(self, prediction_window, stochastic_interval=60, training_cycles=2):
+    def renes_gpy(self, prediction_window, stochastic_interval=5, training_cycles=1):
 
         try:
             training_length = training_cycles * prediction_window
@@ -103,7 +107,7 @@ class IER(object):
             for i in range(training_cycles + 1, 1, -1):
                 test_time = cur_time - timedelta(minutes=prediction_window) * i
 
-                t = self.data[col_production][test_time:test_time + timedelta(minutes=prediction_window - 1)] / 60
+                t = self.data[self.production_key][test_time:test_time + timedelta(minutes=prediction_window - 1)] / 60
                 p = self.renes(test_time, prediction_window)
 
                 prev_truth = np.concatenate([prev_truth, t.values])

@@ -153,7 +153,18 @@ class EVA(EVPlanner):
         self.g.add_node(self.root, usage_cost=np.inf, best_action=None, max_demand=np.inf)
         self.g.add_node(self.target, usage_cost=0, best_action=None, max_demand=starting_max_demand)
 
-        self.prod_prediction = IER(self._data, current_time).predict([prod_algkey])  # todo check renes predictions plz
+        self.real_production_key = None
+
+        if REAL_SOLAR_PRODUCTION in self._data.columns:
+            prediction_type = 'solar'
+            self.real_production_key = REAL_SOLAR_PRODUCTION
+        elif REAL_WIND_PRODUCTION in self._data.columns:
+            prediction_type = 'wind'
+            self.real_production_key = REAL_WIND_PRODUCTION
+        else:
+            raise NotImplemented()
+
+        self.prod_prediction = IER(self._data, current_time, prediction_type).predict([prod_algkey])
         self.cons_prediction = IEC(self._data[:current_time]).predict([cons_algkey])
         self.prod_prediction.index.tz_convert(dataset_tz)
 
@@ -414,9 +425,16 @@ class ChargingController:
 
         self._pricing_model = pricing_model
 
-        self.current_day = self.data[self.start:self.end][[real_production_key, real_consumption_key]]
-        self.current_day['House'] = self.current_day[real_consumption_key]
-        self.current_day['IER'] = self.current_day[real_production_key]
+        if REAL_SOLAR_PRODUCTION in self.data.columns:
+            self.real_production_key = REAL_SOLAR_PRODUCTION
+        elif REAL_WIND_PRODUCTION in self.data.columns:
+            self.real_production_key = REAL_WIND_PRODUCTION
+        else:
+            raise NotImplemented()
+
+        self.current_day = self.data[self.start:self.end][[self.real_production_key, REAL_HOUSE_CONSUMPTION]]
+        self.current_day['House'] = self.current_day[REAL_HOUSE_CONSUMPTION]
+        self.current_day['IER'] = self.current_day[self.real_production_key]
         self.current_day['EV'] = 0
 
     def calc_real_usage(self, time, interval, ev_charge):
@@ -425,8 +443,8 @@ class ChargingController:
         if interval_in_minutes <= 0:
             return 0
 
-        m2 = self.data[time:time + interval - datetime.timedelta(minutes=1)][real_production_key]
-        m1 = self.data[time:time + interval - datetime.timedelta(minutes=1)][real_consumption_key]
+        m2 = self.data[time:time + interval - datetime.timedelta(minutes=1)][self.real_production_key]
+        m1 = self.data[time:time + interval - datetime.timedelta(minutes=1)][REAL_HOUSE_CONSUMPTION]
 
         usage = m1 + ev_charge / interval_in_minutes - m2
 
@@ -438,8 +456,8 @@ class ChargingController:
             return 0
 
         demand = 60 * (
-            self.data[time:time + interval - datetime.timedelta(minutes=1)][real_consumption_key] -
-            self.data[time:time + interval - datetime.timedelta(minutes=1)][real_production_key])
+            self.data[time:time + interval - datetime.timedelta(minutes=1)][REAL_HOUSE_CONSUMPTION] -
+            self.data[time:time + interval - datetime.timedelta(minutes=1)][self.real_production_key])
         demand += 60 * (ev_charge / interval_in_minutes)
 
         if interval_in_minutes == 15:
@@ -755,6 +773,11 @@ def main(*args):
     location.add_argument('--us', action='store_true')
     location.add_argument('--uk', action='store_true')
 
+    ier_types = parser.add_mutually_exclusive_group(required=True)
+    ier_types.add_argument('--solar-only', action='store_true')
+    ier_types.add_argument('--wind-only', action='store_true')
+    ier_types.add_argument('--solar-wind', action='store_true')
+
     agent = parser.add_mutually_exclusive_group(required=True)
     agent.add_argument('--smartcharge', action='store_true')
     agent.add_argument('--informed', action='store_true')
@@ -792,21 +815,41 @@ def main(*args):
         with open(f, 'r') as ymlfile:
             cfg.update(yaml.load(ymlfile))
 
-    # wind dataset is a multli index since it also has predictions from meteo stations
-    wind_data = pd.read_csv("windpower.csv.gz", index_col=[0, 1], parse_dates=True)
-    wind_data.index = wind_data.index.set_levels(
-        [wind_data.index.levels[0], pd.to_timedelta(wind_data.index.levels[1])])
-    wind_data = wind_data.tz_localize('UTC', level=0).tz_convert(dataset_tz, level=0)
+    if args.solar_only:
+        pass
+    elif args.wind_only:
+        pass
+    else:
+        raise NotImplemented("Both solar & wind iers not yet implemented")
+
+    # iers dataset is a multli index since it also has predictions from meteo stations
+    iers_data = pd.read_csv("iers.csv.gz", index_col=[0, 1], parse_dates=True)
+    iers_data.index = iers_data.index.set_levels(
+        [iers_data.index.levels[0], pd.to_timedelta(iers_data.index.levels[1])])
+    iers_data = iers_data.tz_localize('UTC', level=0).tz_convert(dataset_tz, level=0)
+
+    # scale it up according to our config
+
+    iers_data[PREDICTIONS_WIND] = iers_data[PREDICTIONS_WIND] * cfg['adjustment']['wind-scale']
+    iers_data[PREDICTIONS_SOLAR] = iers_data[PREDICTIONS_SOLAR] * cfg['adjustment']['solar-scale']
+
     # simulate a billing period
 
     dataset = pd.read_csv('house_data.csv.gz', parse_dates=[0], index_col=0).tz_localize('UTC').tz_convert(dataset_tz)
 
     dataset['House Consumption'] = dataset['House Consumption'] * cfg['adjustment']['house-scale']
-    dataset['WTG Production'] = dataset['WTG Production'] * cfg['adjustment']['wtg-scale']
+
+    if args.solar_only:
+        dataset[REAL_SOLAR_PRODUCTION] = iers_data['Solar Power'].xs(datetime.timedelta(0), level=1).resample(
+            '1T').interpolate() / 60
+    elif args.wind_only:
+        dataset[REAL_WIND_PRODUCTION] = iers_data['Wind Power'].xs(datetime.timedelta(0), level=1).resample(
+            '1T').interpolate() / 60
+    dataset = dataset.ffill()
 
     # in the dataset find valid months
     months_house = [x.date() for x in dataset.groupby(pd.TimeGrouper(freq='M')).count().index.tolist()]
-    months_wind = [x.date() for x in wind_data.xs(datetime.timedelta(0), level=1).groupby(
+    months_wind = [x.date() for x in iers_data.xs(datetime.timedelta(0), level=1).groupby(
         pd.TimeGrouper(freq='M')).count().index.tolist()]
 
     valid_months = set(months_house) & set(months_wind)
@@ -866,12 +909,21 @@ def main(*args):
     # simulator.draw_period()
     meta = simulator.get_metadata()
     # some extra metadata
-    meta['wtg-scale'] = cfg['adjustment']['wtg-scale']
-    meta['house-scale'] = cfg['adjustment']['house-scale']
+
     meta['actions'] = cfg['battery']['actions']
     meta['seed'] = random_seed
     meta['execution-date'] = datetime.datetime.now()
-    meta['ier-type'] = 'wind'
+    meta['wind-scale'] = cfg['adjustment']['wind-scale']
+    meta['solar-scale'] = cfg['adjustment']['solar-scale']
+    meta['house-scale'] = cfg['adjustment']['house-scale']
+
+    if args.wind_only:
+        meta['ier-type'] = 'wind'
+    elif args.solar_only:
+        meta['ier-type'] = 'solar'
+    else:
+        meta['ier-type'] = 'solar-wind'
+
 
     if lunch_break:
         meta['online-periods'] = 'with-lunch'

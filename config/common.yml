@@ -3,7 +3,8 @@ dataset:
     timezone: 'Europe/Zurich'
 
 adjustment:
-    wtg-scale: 3
+    wind-scale: 3
+    solar-scale: 40
     house-scale: 1
 
 random-seed: 1337
