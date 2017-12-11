@@ -2,13 +2,14 @@ from collections import namedtuple
 
 
 class SimulatorResults():
-    all_pricing = ('Europe', 'US')
-    all_agent = ('SmartCharge', 'Simple-Delayed', 'Simple-Informed', 'Informed-Delayed', 'Dummy')
-    all_mpc = (True, False)
-    all_ier_type = ('solar', 'wind')
-    all_month = ('Jan2017', 'Feb2017', 'Mar2017', 'Apr2017', 'May2017', 'Jun2017', 'Jul2017')
-    all_online_periods = ('night-only', 'with-lunch')
-
+    args_list = {
+        'pricing': ('Europe', 'US'),
+        'agent': ('SmartCharge', 'Simple-Delayed', 'Simple-Informed', 'Informed-Delayed', 'Dummy'),
+        'mpc': (True, False),
+        'ier_type': ('solar', 'wind'),
+        'month': ('Jan2017', 'Feb2017', 'Mar2017', 'Apr2017', 'May2017', 'Jun2017', 'Jul2017'),
+        'online-periods': ('night-only', 'with-lunch'),
+    }
     args_map = {
         'pricing': {
             'Europe': '--uk',
