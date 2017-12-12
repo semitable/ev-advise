@@ -322,7 +322,11 @@ class SimpleEVPlanner(EVPlanner):
                                               action_set, starting_max_demand, pricing_model)
 
         self._is_informed = is_informed
-        self._is_delayed = is_delayed
+
+        if end_time.time() > datetime.time(12):  # for lunch break
+            self._is_delayed = False
+        else:
+            self._is_delayed = is_delayed
 
         if current_time.time() > datetime.time(12):  # if we are after noon
             cur_date = current_time.date()
