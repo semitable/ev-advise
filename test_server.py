@@ -1,4 +1,3 @@
-import itertools
 import logging
 import signal
 import sys
@@ -9,10 +8,10 @@ import pandas as pd
 import advise
 from advise import write_hdf
 from constants import _RESULTS_FILE
+from results import SimulatorResults
 
 logger = logging.getLogger('ev-advise-tester')
 
-from results import SimulatorResults
 
 def get_existing_results():
     hdf = pd.HDFStore(_RESULTS_FILE, complib='zlib', complevel=9)
@@ -38,23 +37,23 @@ class DelayedKeyboardInterrupt(object):
         if self.signal_received:
             self.old_handler(*self.signal_received)
 
+
 def worker(args):
     return advise.main(*args)
 
 
 def main():
     existing = get_existing_results()
-    print(existing)
-    exit()
-    permutations = list(itertools.product(pricing_all, agents_all, mpc_all, months_all, ier_type_all))
+    permutations = SimulatorResults.get_result_permutations()
 
     not_executed = set(permutations) - set(existing)
 
-    # not_executed = list(filter(lambda x: x[1] != 'smartcharge', not_executed))
+    not_executed = filter(lambda x: x.agent != 'SmartCharge', not_executed)
 
-    args_list = [list(build_args(get_args_dict_from_tuple(t))) for t in not_executed]
+    args_list = map(SimulatorResults.make_args, not_executed)
+    args_list = [e + ['--suppress-tqdm', '--quiet'] for e in args_list]
 
-    print("Number of permutations not executed: ", len(not_executed))
+    print("Number of permutations not executed: ", len(args_list))
     input("Press enter to continue..")
 
     p = Pool(processes=cpu_count() - 1)
@@ -70,7 +69,8 @@ def main():
     for result in func_map:
         with DelayedKeyboardInterrupt():
             logger.info('Writing {} result to hdf'.format(result['key']))
-            write_hdf(_RESULTS_FILE, result['key'], result['results'], meta=result['meta'], complib='zlib')
+            write_hdf(_RESULTS_FILE, result['key'], result['results'],
+                      meta=SimulatorResults.result_tuple_from_dict(result['meta']), complib='zlib')
 
 
 if __name__ == '__main__':

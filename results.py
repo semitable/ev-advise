@@ -1,15 +1,15 @@
-from collections import namedtuple
-
+from collections import namedtuple, OrderedDict
+from itertools import chain, product
 
 class SimulatorResults():
-    args_list = {
-        'pricing': ('Europe', 'US'),
-        'agent': ('SmartCharge', 'Simple-Delayed', 'Simple-Informed', 'Informed-Delayed', 'Dummy'),
-        'mpc': (True, False),
-        'ier_type': ('solar', 'wind'),
-        'month': ('Jan2017', 'Feb2017', 'Mar2017', 'Apr2017', 'May2017', 'Jun2017', 'Jul2017'),
-        'online-periods': ('night-only', 'with-lunch'),
-    }
+    args_list = OrderedDict([
+        ('pricing', ('Europe', 'US')),
+        ('agent', ('SmartCharge', 'Simple-Delayed', 'Simple-Informed', 'Informed-Delayed', 'Dummy')),
+        ('mpc', (True, False)),
+        ('ier_type', ('solar', 'wind')),
+        ('month', ('Jan2017', 'Feb2017', 'Mar2017', 'Apr2017', 'May2017', 'Jun2017', 'Jul2017')),
+        ('online_periods', ('night-only', 'with-lunch')),
+    ])
     args_map = {
         'pricing': {
             'Europe': '--uk',
@@ -45,17 +45,32 @@ class SimulatorResults():
         },
     }
 
-    ResultMeta = namedtuple('ResultMeta', ['execution_date', 'seed',
-                                           'agent', 'actions', 'month', 'mpc', 'online_periods', 'pricing', 'ier_type',
-                                           'house_scale', 'solar_scale', 'wind_scale'])
 
     @staticmethod
     def result_tuple_from_dict(d):
-        return SimulatorResults.ResultMeta(**{k.replace("-", "_"): v for k, v in d.items()})
+        return ResultMeta(**{k.replace("-", "_"): v for k, v in d.items()})
 
-    @staticmethod
-    def make_args(t: ResultMeta):
-        args = [SimulatorResults.args_map[k][v] for k, v in t._asdict().items() if
-                k in SimulatorResults.args_map and SimulatorResults.args_map[k][v] is not None]
+    @classmethod
+    def make_args(cls, t):
+        args = [cls.args_map[k][v] for k, v in t._asdict().items() if
+                k in cls.args_map and cls.args_map[k][v] is not None]
         # and split them (mostly for the --month-index X thing)
         return [w for segments in args for w in segments.split()]
+
+    @classmethod
+    def argsmeta_from_resultmeta(cls, m):
+        return ArgsMeta(**{k: v for k, v in m._asdict().items() if k in cls.args_list})
+
+    @classmethod
+    def get_result_permutations(cls):
+        """
+        :return: a list of all possible permutations of ArgsMeta
+        """
+        p = product(*cls.args_list.values())
+        return [ArgsMeta(**{k: v for k, v in zip(cls.args_list.keys(), perm)}) for perm in p]
+
+
+ArgsMeta = namedtuple('ArgsMeta', SimulatorResults.args_list.keys())
+ResultMeta = namedtuple('ResultMeta', chain(['execution_date', 'seed'],
+                                            SimulatorResults.args_list.keys(),
+                                            ['actions', 'house_scale', 'solar_scale', 'wind_scale']))

@@ -7,7 +7,6 @@ import logging
 import random
 import sys
 import uuid
-from collections import namedtuple
 from itertools import zip_longest
 
 import networkx as nx
@@ -755,10 +754,6 @@ def write_hdf(f, key, df, meta=None, complib='zlib'):
         store.get_storer(key).attrs.meta = meta
 
 
-ResultMetaData = namedtuple('results_meta',
-                            ['agent', 'pricing', 'battery_actions', 'execution_date', 'house_scale',
-                             'wtg_scale', 'ier_type', 'month', 'mpc', 'online_periods', 'seed'])
-
 
 def main(*args):
     # argument parser
@@ -930,7 +925,7 @@ def main(*args):
     else:
         meta['online-periods'] = 'night-only'
 
-    name = uuid.uuid4().hex
+    name = '_' + uuid.uuid4().hex
     # simulator.billing_period.tz_convert('UTC').to_csv('r1.csv.gz', compression='gzip')
     results = simulator.billing_period.tz_convert('UTC')
     cols = ['House', 'IER', 'EV']
