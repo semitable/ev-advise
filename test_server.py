@@ -18,7 +18,7 @@ def get_existing_results():
     existing = []
     for key in hdf.keys():
         meta = hdf.get_storer(key).attrs.meta
-        existing.append({'meta': SimulatorResults.result_tuple_from_dict(meta), 'key': key})
+        existing.append({'meta': SimulatorResults.argsmeta_from_resultmeta(meta), 'key': key})
     hdf.close()
     return existing
 
@@ -43,12 +43,12 @@ def worker(args):
 
 
 def main():
-    existing = get_existing_results()
+    existing = [k['meta'] for k in get_existing_results()]
     permutations = SimulatorResults.get_result_permutations()
 
     not_executed = set(permutations) - set(existing)
 
-    not_executed = filter(lambda x: x.agent != 'SmartCharge', not_executed)
+    # not_executed = filter(lambda x: x.agent != 'SmartCharge', not_executed)
 
     args_list = map(SimulatorResults.make_args, not_executed)
     args_list = [e + ['--suppress-tqdm', '--quiet'] for e in args_list]
