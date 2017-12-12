@@ -187,7 +187,6 @@ class EVA(EVPlanner):
         m1 = self.cons_prediction[time:time + interval - datetime.timedelta(minutes=1)][cons_algkey]
 
         usage = m1 + ev_charge / interval_in_minutes - m2
-
         return self._pricing_model.get_usage_cost(usage)
 
     def calc_max_demand(self, time, interval, ev_charge):
@@ -700,8 +699,7 @@ class BillingPeriodSimulator:
                 )
 
                 disconnect_time_lunch = round_time(
-                    random_time(datetime.time(hour=17, minute=00), datetime.timedelta(minutes=20),
-                                current_date + datetime.timedelta(days=1)),
+                    random_time(datetime.time(hour=17, minute=00), datetime.timedelta(minutes=20), current_date),
                     round_interval
                 )
                 connect_time_night = round_time(
@@ -735,8 +733,8 @@ class BillingPeriodSimulator:
         offline_periods.append((tz.localize(prev_disconnect),
                                 tz.localize(datetime.datetime.combine(end_date, datetime.time(hour=23, minute=59)))))
 
-        # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0].time()), str(x[1].time()), x[2]), online_periods), sep='\n')
-        # print(*map(lambda x: "{} - {}".format(str(x[0].time()), str(x[1].time())), offline_periods), sep='\n')
+        # print(*map(lambda x: "{} - {} : {:.2f}".format(str(x[0]), str(x[1]), x[2]), online_periods), sep='\n')
+        # print(*map(lambda x: "{} - {}".format(str(x[0]), str(x[1])), offline_periods), sep='\n')
 
         return online_periods, offline_periods
 
