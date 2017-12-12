@@ -74,3 +74,17 @@ ArgsMeta = namedtuple('ArgsMeta', SimulatorResults.args_list.keys())
 ResultMeta = namedtuple('ResultMeta', chain(['execution_date', 'seed'],
                                             SimulatorResults.args_list.keys(),
                                             ['actions', 'house_scale', 'solar_scale', 'wind_scale']))
+
+
+def rfilter(k, r):
+    """
+    
+    :param k: the attribute name of the ResultMeta tuple (e.g. 'ier_type')
+    :param r: the value we want to check (e.g. 'wind')
+    :return: 
+    """
+
+    def f(x):
+        return getattr(x, k) == r
+
+    return f
