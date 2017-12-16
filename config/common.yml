@@ -9,9 +9,3 @@ adjustment:
 
 random-seed: 1337
 
-battery:
-    soc-range:
-        min: 0.2
-        max: 0.8
-
-    actions: 'five' # 'all', 'five' or 'two'

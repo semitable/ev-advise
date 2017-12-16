@@ -5,36 +5,7 @@ import datetime
 from math import exp, sqrt, pow
 
 import numpy as np
-import yaml
 from scipy.interpolate import interp1d
-
-with open("config/common.yml", 'r') as ymlfile:
-    cfg = yaml.load(ymlfile)
-
-if cfg['battery']['actions'] == 'two':
-    battery_action_set = [0, 1]
-    battery_efficiency = [1, 0.91]
-
-elif cfg['battery']['actions'] == 'five':
-    battery_action_set = [0, 0.25, 0.5, 0.75, 1]
-    battery_efficiency = [0, 0.85, 0.89, 0.9, 0.91]
-
-elif cfg['battery']['actions'] == 'all':
-
-    # interpolating efficiency
-    x = [0.2, 0.25, 0.5, 0.75, 1]
-    y = [0.81, 0.85, 0.89, 0.9, 0.91]
-
-    f = interp1d(x, y)
-
-    battery_action_set = np.linspace(0.2, 1, 81)
-    battery_efficiency = f(battery_action_set)
-
-    battery_action_set = list(battery_action_set)
-    battery_efficiency = list(battery_efficiency)
-
-else:
-    raise ValueError
 
 
 class Battery:
@@ -174,7 +145,32 @@ class ChargerCache:
 
 
 class Charger:
-    def __init__(self):
+    def __init__(self, battery_actions):
+
+        if battery_actions == 'two':
+            battery_action_set = [0, 1]
+            battery_efficiency = [1, 0.91]
+
+        elif battery_actions == 'five':
+            battery_action_set = [0, 0.25, 0.5, 0.75, 1]
+            battery_efficiency = [0, 0.85, 0.89, 0.9, 0.91]
+
+        elif battery_actions == 'all':
+
+            # interpolating efficiency
+            x = [0.2, 0.25, 0.5, 0.75, 1]
+            y = [0.81, 0.85, 0.89, 0.9, 0.91]
+
+            f = interp1d(x, y)
+
+            battery_action_set = np.linspace(0.2, 1, 81)
+            battery_efficiency = f(battery_action_set)
+
+            battery_action_set = list(battery_action_set)
+            battery_efficiency = list(battery_efficiency)
+
+        else:
+            raise ValueError("Charger supports only 'two', 'five' and 'all' actions for now")
 
         self.cache = ChargerCache()
 

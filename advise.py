@@ -25,7 +25,7 @@ from ier.ier import IER
 from safehdf import SafeHDF5Store
 
 # a global charger to take advantage of result caching
-Charger = ChargerClass()
+Charger = None
 
 logger = logging.getLogger('advise-unit')
 
@@ -788,9 +788,14 @@ def main(*args):
 
     parser.add_argument('--month-index', metavar='i', type=int, nargs=1, required=True)
 
+    parser.add_argument('--battery-actions', metavar='a', type=str, nargs=1, required=True)
+
     parser.add_argument('--lunch-break', action='store_true')
 
     args = parser.parse_args(args)
+
+    global Charger
+    Charger = ChargerClass(args.battery_actions[0])
 
     ch = logging.StreamHandler(sys.stdout)
     ch.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
