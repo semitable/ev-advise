@@ -912,7 +912,7 @@ def main(*args):
     meta = simulator.get_metadata()
     # some extra metadata
 
-    meta['actions'] = cfg['battery']['actions']
+    meta['actions'] = args.battery_actions[0]
     meta['seed'] = random_seed
     meta['execution-date'] = datetime.datetime.now()
     meta['wind-scale'] = cfg['adjustment']['wind-scale']

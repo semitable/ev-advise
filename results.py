@@ -9,6 +9,8 @@ class SimulatorResults():
         ('ier_type', ('solar', 'wind')),
         ('month', ('Jan2017', 'Feb2017', 'Mar2017', 'Apr2017', 'May2017', 'Jun2017', 'Jul2017')),
         ('online_periods', ('night-only', 'with-lunch')),
+        ('actions', ('two', 'five')),
+
     ])
     args_map = {
         'pricing': {
@@ -43,6 +45,11 @@ class SimulatorResults():
             'night-only': None,
             'with-lunch': '--lunch-break',
         },
+        'actions': {
+            'two': '--battery-actions two',
+            'five': '--battery-actions five',
+        },
+
     }
 
 
@@ -73,7 +80,7 @@ class SimulatorResults():
 ArgsMeta = namedtuple('ArgsMeta', SimulatorResults.args_list.keys())
 ResultMeta = namedtuple('ResultMeta', chain(['execution_date', 'seed'],
                                             SimulatorResults.args_list.keys(),
-                                            ['actions', 'house_scale', 'solar_scale', 'wind_scale']))
+                                            ['house_scale', 'solar_scale', 'wind_scale']))
 
 
 def rfilter(k, r):
